@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package logrpc;
+
+// Service RemoteLogger handles incoming log entries
+service RemoteLogger {
+
+  // Writes a log to a local file/stdout
+  rpc Log(LogEntry) returns (Nothing) {}
+
+}
+
+// Empty response
+message Nothing {}
+
+// LogEntry contains a map[colID]entry that will be written to a log
+message LogEntry {
+  map<int64, string> entry = 1;
+}
