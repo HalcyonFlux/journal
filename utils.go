@@ -77,13 +77,13 @@ func (l *Logger) rotateFile() killswitch {
 				}
 
 				// Replace local writers
-				l.Lock()
+				l.mu.Lock()
 				l.logfile.Close()
 				l.logfile = f
 				if isNew && !l.config.JSON {
 					l.logfile.WriteString(fmt.Sprintf("%s\n", l.headers()))
 				}
-				l.Unlock()
+				l.mu.Unlock()
 
 				// Compress and delete old file
 				if l.config.Compress && prev != "" {
@@ -251,7 +251,7 @@ func (l *Logger) pushToLedger(depth int, caller string, code int, msg string, fo
 	// An active Logger will wait for the transit to finish
 	inTransit := l.active
 	if inTransit {
-		l.ledgerProcessing.Add(1)
+		l.wg.Add(1)
 	}
 
 	// Format message
@@ -332,7 +332,7 @@ func (l *Logger) write() killswitch {
 			select {
 			case entry := <-l.ledger:
 
-				l.Lock()
+				l.mu.Lock()
 
 				// Write to stdout
 				if l.stdout != nil {
@@ -362,8 +362,8 @@ func (l *Logger) write() killswitch {
 					}
 				}
 
-				l.ledgerProcessing.Done()
-				l.Unlock()
+				l.wg.Done()
+				l.mu.Unlock()
 
 			case <-quitChan:
 				break Loop
@@ -374,4 +374,19 @@ func (l *Logger) write() killswitch {
 
 	<-ready
 	return quitChan
+}
+
+// canWrite checks if the directory is writeable
+func canWrite(folder string) bool {
+
+	f, err := ioutil.TempFile(folder, "write_test")
+	if err != nil {
+		return false
+	}
+
+	name := f.Name()
+	f.Close()
+	os.Remove(name)
+
+	return true
 }

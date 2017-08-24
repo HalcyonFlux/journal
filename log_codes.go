@@ -2,11 +2,11 @@ package log
 
 // File rotation frequency
 const (
-	ROT_CONTINUOUS = 0
-	ROT_DAILY      = 1
-	ROT_WEEKLY     = 2
-	ROT_MONTHLY    = 3
-	ROT_ANNUALLY   = 4
+	ROT_NONE     = 0
+	ROT_DAILY    = 1
+	ROT_WEEKLY   = 2
+	ROT_MONTHLY  = 3
+	ROT_ANNUALLY = 4
 )
 
 // Output selection

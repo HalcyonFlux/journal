@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Config contains all the necessary settings to build a new logging facility
+// Config contains all the necessary settings to create a new local logging facility
 type Config struct {
 	Service  string  // Service name
 	Instance string  // Instance name
@@ -31,7 +31,7 @@ type killswitch chan<- bool
 func New(config *Config) (*Logger, error) {
 
 	// Validate options
-	if config.Rotation < ROT_CONTINUOUS || config.Rotation > ROT_ANNUALLY {
+	if config.Rotation < ROT_NONE || config.Rotation > ROT_ANNUALLY {
 		return nil, fmt.Errorf("New: invalid roll option '%d'", config.Rotation)
 	}
 	if config.Out < OUT_FILE || config.Out > OUT_FILE_AND_STDOUT {
@@ -48,15 +48,22 @@ func New(config *Config) (*Logger, error) {
 		}
 	}
 
+	// Check permissions
+	if config.Out == OUT_FILE || config.Out == OUT_FILE_AND_STDOUT {
+		if !canWrite(config.Folder) {
+			return nil, fmt.Errorf("New: cannot write to '%s'", config.Folder)
+		}
+	}
+
 	// Initiate log instance
 	Log := &Logger{
-		Mutex:            &sync.Mutex{},
-		active:           true,
-		config:           config,
-		codes:            defaultCodes,
-		ledger:           make(chan logEntry, 1000),
-		ledgerTransit:    &sync.WaitGroup{},
-		ledgerProcessing: &sync.WaitGroup{},
+		mu:           &sync.Mutex{},
+		wg:           &sync.WaitGroup{},
+		active:       true,
+		config:       config,
+		codes:        defaultCodes,
+		ledger:       make(chan logEntry, 1000),
+		killswitches: []killswitch{},
 	}
 
 	// Start file rotation (async)
@@ -70,15 +77,15 @@ func New(config *Config) (*Logger, error) {
 
 // Logger is the main loggger struct
 type Logger struct {
-	*sync.Mutex
+	mu *sync.Mutex     // Protect logfile changes
+	wg *sync.WaitGroup // Protect ledger processing
+
 	active bool         // logger Activity switch
 	config *Config      // Main config
 	codes  map[int]Code // Mapping of integer message codes to their string values
 
-	ledger           chan logEntry   // Ledger of unprocessed log entries
-	ledgerTransit    *sync.WaitGroup // Waitgroup for messages in transit (being sent to the ledger)
-	ledgerProcessing *sync.WaitGroup // Waitgroup for messages in process (being written to various backends)
-	killswitches     []killswitch    // Killswitches of all coroutines spawned by the logger
+	ledger       chan logEntry // Ledger of unprocessed log entries
+	killswitches []killswitch  // Killswitches of all coroutines spawned by the logger
 
 	// log Writers
 	logfile       *os.File    // local logfile's file descriptor
@@ -132,8 +139,30 @@ func (l *Logger) NewCallerCode(caller string, code int) func(string, ...interfac
 
 }
 
-// AddRemote adds a remote backend to send logs to
-func (l *Logger) AddRemote(writer io.Writer) {
+// RawEntry writes a raw log entry (map of strings) into the ledger.
+// The raw entry must contain columns COL_DATE_YYMMDD_HHMMSS_NANO to COL_LINE
+func (l *Logger) RawEntry(entry map[int64]string) error {
+
+	// Validate the raw Entry
+	for _, code := range defaultCols {
+		if _, ok := entry[code]; !ok {
+			return fmt.Errorf("RawEntry: missing column '%d'", code)
+		}
+	}
+
+	// Write the entry into the ledger
+	if l.active {
+		l.wg.Add(1)
+		go func() {
+			l.ledger <- entry
+		}()
+	}
+
+	return nil
+}
+
+// AddDestination adds a (remote) destination to send logs to
+func (l *Logger) AddDestination(writer io.Writer) {
 	l.remoteWriters = append(l.remoteWriters, writer)
 }
 
@@ -143,15 +172,12 @@ func (l *Logger) Quit() {
 	// Deactivate ledger
 	l.active = false
 
-	// Wait for the ledger transits to finish
-	l.ledgerTransit.Wait()
-
 	// Wait for the ledger processing to finish
-	l.ledgerProcessing.Wait()
+	l.wg.Wait()
 
 	// Lock any writing or file rotation activity
-	l.Lock()
-	defer l.Unlock()
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
 	// Stop all registered coroutines
 	for _, killswitch := range l.killswitches {

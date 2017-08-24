@@ -6,7 +6,7 @@ package logrpc;
 service RemoteLogger {
 
   // Writes a log to a local file/stdout
-  rpc Log(LogEntry) returns (Nothing) {}
+  rpc RemoteLog(LogEntry) returns (Nothing) {}
 
 }
 
