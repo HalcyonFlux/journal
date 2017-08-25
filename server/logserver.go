@@ -6,6 +6,7 @@ import (
 	"github.com/vaitekunas/log/logrpc"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,8 +18,19 @@ import (
 // killswitch is used to close all goroutines
 type killswitch chan<- bool
 
+// Statistic contains various log-related statistics
+type Statistic struct {
+	Service         string
+	Instance        string
+	LogsParsed      [24]int64
+	LogsParsedBytes [24]int64
+	LastIP          string
+	LastActive      time.Time
+}
+
 // LogServer implements log.Logger and log.RemoteLoggerServer interfaces
 type LogServer struct {
+	banner string         // Banner for the management console
 	logger *log.Logger    // Local logger
 	server *grpc.Server   // gRPC server
 	wg     sync.WaitGroup // Waitgroup for the unix and grpc listeners
@@ -29,12 +41,13 @@ type LogServer struct {
 
 	killswitches []killswitch
 
-	tokens   map[string]map[string]string // Authorization tokens map[service]map[instance]token
-	quitChan chan bool                    // Internal kill switch
+	tokens   map[string]string // Authorization tokens map[service]map[instance]token
+	quitChan chan bool         // Internal kill switch
 }
 
 // RemoteLog handles incoming remote logs
 func (l *LogServer) RemoteLog(ctx context.Context, logEntry *logrpc.LogEntry) (*logrpc.Nothing, error) {
+	// TODO: register last IP and amount of logs parsed
 	if err := l.logger.RawEntry(logEntry.Entry); err != nil {
 		return nil, fmt.Errorf("RemoteLog: could not process raw log: %s", err.Error())
 	}
@@ -60,15 +73,12 @@ func (l *LogServer) Authorize(ctx context.Context) error {
 	// Extract the real token
 	service := md["service"][0]
 	instance := md["instance"][0]
+	key := fmt.Sprintf("%s/%s", strings.ToLower(service), strings.ToLower(instance))
 	token := md["token"][0]
 
-	serviceTokens, ok := l.tokens[service]
+	realToken, ok := l.tokens[key]
 	if !ok {
-		return fmt.Errorf("Authorize: unknown service")
-	}
-	realToken, ok := serviceTokens[instance]
-	if !ok {
-		return fmt.Errorf("Authorize: unknown instance")
+		return fmt.Errorf("Authorize: unknown service/instance")
 	}
 
 	// Authorize
@@ -79,9 +89,19 @@ func (l *LogServer) Authorize(ctx context.Context) error {
 	return nil
 }
 
+// GatherStatistics saves log-related statistics
+func (l *LogServer) GatherStatistics(service, instance string, entry *logrpc.LogEntry) {
+
+}
+
 // KillSwitch returns the internal killswitch
 func (l *LogServer) KillSwitch() chan bool {
 	return l.quitChan
+}
+
+// GetBanner returns server's banner
+func (l *LogServer) GetBanner() string {
+	return l.banner
 }
 
 // Quit stops the server and all goroutines
@@ -110,6 +130,8 @@ type Config struct {
 	Port         int
 	UnixSockPath string
 	TokenPath    string
+	StatsPath    string
+	Banner       string
 
 	// Local logger config
 	LoggerConfig *log.Config
@@ -119,7 +141,7 @@ type Config struct {
 func New(config *Config) (*LogServer, error) {
 
 	// Instantiate remote logserver
-	rLogger := &LogServer{}
+	rLogger := &LogServer{banner: config.Banner}
 
 	// Listen on to the unix socket
 	listenUnix, err := net.Listen("unix", config.UnixSockPath)
@@ -128,26 +150,24 @@ func New(config *Config) (*LogServer, error) {
 	}
 
 	// Serve socket requests
-	once := &sync.Once{}
-	ready, quitChan, connChan := make(chan bool, 1), make(chan bool, 1), make(chan net.Conn, 1)
+	quitChan, connChan := make(chan bool, 1), make(chan net.Conn, 1)
 	rLogger.killswitches = append(rLogger.killswitches, quitChan)
+
+	// Listen for incoming unix connections
+	go func() {
+		for {
+			fd, errUnix := listenUnix.Accept()
+			if errUnix != nil {
+				continue
+			}
+			connChan <- fd
+		}
+	}()
+
+	// Process unix connections
 	go func() {
 	Loop:
 		for {
-
-			// Listen for incoming unix connections
-			go func() {
-				fd, errUnix := listenUnix.Accept()
-				if errUnix != nil {
-					return
-				}
-				connChan <- fd
-			}()
-
-			// Announce readyness
-			once.Do(func() { ready <- true })
-
-			// Handle connections or quit
 			select {
 			case conn := <-connChan:
 				go rLogger.HandleUnixRequest(conn)
@@ -156,7 +176,6 @@ func New(config *Config) (*LogServer, error) {
 			}
 		}
 	}()
-	<-ready
 
 	// Listen on tcp
 	listenTCP, err := net.Listen("tcp", fmt.Sprintf(":%d", config.Port))
@@ -178,6 +197,7 @@ func New(config *Config) (*LogServer, error) {
 	rLogger.listenUnix = listenUnix
 	rLogger.listenTCP = listenTCP
 	rLogger.server = grpc.NewServer(grpc.UnaryInterceptor(intercept))
+	rLogger.tokens = make(map[string]string)
 	rLogger.quitChan = make(chan bool, 1)
 
 	// Serve gRPC requests
