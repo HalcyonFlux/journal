@@ -249,7 +249,7 @@ func (m *managementConsole) CmdTokensListServices(args Args) *Response {
 
 	// Prepare table
 	table := [][]string{}
-	table = append(table,[]string{red.Sprint("●"),"Service", "Instances", "Last log entry", "Log entries parsed"})
+	table = append(table,[]string{"","Service", "Instances", "Last log entry", "Log entries parsed"})
 	for _, name := range serviceNames {
 		service := services[name]
 		entry := []string{
