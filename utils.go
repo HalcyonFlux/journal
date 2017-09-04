@@ -1,4 +1,4 @@
-package log
+package journal
 
 import (
 	"compress/flate"

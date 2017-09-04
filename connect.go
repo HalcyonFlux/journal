@@ -1,9 +1,9 @@
-package log
+package journal
 
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/vaitekunas/log/logrpc"
+	"github.com/vaitekunas/journal/logrpc"
 	"io"
 	"time"
 
@@ -15,6 +15,7 @@ import (
 // and is used to write log entries to a remote log server
 type remoteClient struct {
 	timeout time.Duration
+	close   func() error
 	client  logrpc.RemoteLoggerClient
 }
 
@@ -35,22 +36,25 @@ func (r *remoteClient) Write(p []byte) (n int, err error) {
 		return 0, fmt.Errorf("Write: failed to write log to remote backend: %s", err.Error())
 	}
 
-	select {
-	case <-ctx.Done():
-		if ctx.Err() != nil {
-			return 0, fmt.Errorf("Write: writing to remote backend failed: %s", ctx.Err().Error())
-		}
-	}
-
 	return len(p), nil
 }
 
-// ConnectToLogServer connects to a log server backend
-func ConnectToLogServer(host string, port int, token string, timeout time.Duration) (io.Writer, error) {
+// Close closes the remote client connection
+func (r *remoteClient) Close() error {
+	if r.close != nil {
+		return r.close()
+	}
+	return nil
+}
+
+// ConnectToJournald connects to a log server backend
+func ConnectToJournald(host string, port int, service, instance, token string, timeout time.Duration) (io.WriteCloser, error) {
 
 	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", host, port), grpc.WithPerRPCCredentials(&logrpc.TokenCred{
-		Token: token,
-	}))
+		Service:  service,
+		Instance: instance,
+		Token:    token,
+	}), grpc.WithInsecure())
 
 	if err != nil {
 		return nil, fmt.Errorf("ConnectToLogServer: could not establish a gRPC connection :%s", err.Error())
@@ -58,12 +62,13 @@ func ConnectToLogServer(host string, port int, token string, timeout time.Durati
 
 	return &remoteClient{
 		timeout: timeout,
+		close:   conn.Close,
 		client:  logrpc.NewRemoteLoggerClient(conn),
 	}, nil
 }
 
 // ConnectToKafka connects to a kafka backend as a producer
-func ConnectToKafka(host string, port int, topic string) (io.Writer, error) {
+func ConnectToKafka(host string, port int, topic string) (io.WriteCloser, error) {
 
 	return nil, nil
 }

@@ -1,16 +1,14 @@
 package server
 
 import (
+	"bytes"
 	"fmt"
-	"time"
-	"reflect"
-	"strings"
-	"strconv"
-	"sort"
 	"github.com/fatih/color"
-
-	rand "crypto/rand"
-	"crypto/sha256"
+	"github.com/vaitekunas/lentele"
+	"reflect"
+	"sort"
+	"strings"
+	"time"
 )
 
 // ManagementConsole handles commands received over the unix socket
@@ -60,17 +58,14 @@ func NewConsole(server *LogServer) ManagementConsole {
 
 // managementConsole handles commands received over the unix socket
 type managementConsole struct {
-	banner string
+	banner    string
 	logserver *LogServer
 }
 
 // Execute is the executor of management console commands
 func (m *managementConsole) Execute(cmd string, args Args) *Response {
 
-	response := &Response{
-		Status: "failure",
-		Error:  fmt.Errorf("Execute: unknown command '%s'", cmd),
-	}
+	fmt.Printf(" ▶ [%s] Received command [%s]\n", time.Now().Format("2006-01-02 15:04:05"), bold(strings.ToLower(cmd)))
 
 	switch strings.ToLower(cmd) {
 	case "statistics":
@@ -94,7 +89,10 @@ func (m *managementConsole) Execute(cmd string, args Args) *Response {
 	case "remote.list":
 		return m.CmdRemoteList(args)
 	default:
-		return response
+		return &Response{
+			Status: "failure",
+			Error:  fmt.Errorf("Execute: unknown command '%s'", cmd).Error(),
+		}
 	}
 
 }
@@ -122,11 +120,11 @@ func validArguments(args Args, required []arg) bool {
 
 var respMissingArgs = &Response{
 	Status: "failure",
-	Error:  fmt.Errorf("Missing/invalid parameters"),
+	Error:  fmt.Errorf("Missing/invalid parameters").Error(),
 }
 
 // CmdStatistics displays various log-related statistics
-func (m *managementConsole) CmdStatistics(args Args) * Response {
+func (m *managementConsole) CmdStatistics(args Args) *Response {
 	return &Response{}
 }
 
@@ -139,6 +137,7 @@ func (m *managementConsole) CmdTokensAdd(args Args) *Response {
 		arg{"instance", reflect.String},
 	}
 
+	// Validate arguments
 	if !validArguments(args, required) {
 		return respMissingArgs
 	}
@@ -146,35 +145,25 @@ func (m *managementConsole) CmdTokensAdd(args Args) *Response {
 	// Identify service/instance
 	service := args["service"].(string)
 	instance := args["instance"].(string)
-	key := fmt.Sprintf("%s/%s", strings.ToLower(service), strings.ToLower(instance))
-
-	// Create a random token
-	tokenBytes := make([]byte, 32)
-	if _, err := rand.Read(tokenBytes); err != nil {
+	token, err := m.logserver.AddToken(service, instance)
+	if err != nil {
 		return &Response{
 			Status: "failure",
-			Error:  fmt.Errorf("Could not generate a new random token. Sorry"),
-		}
-	}
-	token := fmt.Sprintf("%x", sha256.Sum256(tokenBytes))
-
-	// TODO: implement locking of tokens
-	// m.logserver.Lock()
-	// defer m.logserver.Unlock()
-
-	if _, ok := m.logserver.tokens[key]; !ok {
-		m.logserver.tokens[key] = token
-		// Write tokens to file
-		// TODO
-		return &Response{
-			Status:  "success",
-			Payload: fmt.Sprintf("Created a new token for %s/%s:\n%s", service, instance, boxStr(token)),
+			Error:  fmt.Errorf("Could not add token: %s", err.Error()).Error(),
 		}
 	}
 
+	// Prepare table
+	table := lentele.New("Service", "Instance", "Token")
+	table.AddTitle(fmt.Sprintf("Token created for %s/%s", service, instance))
+	table.AddRow("").Insert(service, instance, token).Modify(bold, "Token")
+	buf := bytes.NewBuffer([]byte{})
+	table.Render(buf, false, true, false, lentele.LoadTemplate("classic"))
+
+	// Successful op
 	return &Response{
-		Status:  "failure",
-		Payload: fmt.Sprintf("Token for %s/%s already exists", service, instance),
+		Status:  "success",
+		Payload: buf.String(),
 	}
 
 }
@@ -201,26 +190,29 @@ func (m *managementConsole) CmdTokensListInstances(args Args) *Response {
 		return respMissingArgs
 	}
 
-	// Prepare table
-	table := [][]string{}
-	table = append(table,[]string{"Instance", "Token", "Last IP", "Logs parsed"})
-
 	// Identify service
 	service := strings.ToLower(args["service"].(string))
 
+	// Prepare table
+	table := lentele.New("Instance", "Token", "Last IP", "Logs parsed")
+	table.AddTitle(fmt.Sprintf("Service %s: permited instances", service))
+
 	for key, token := range m.logserver.tokens {
-		parts := strings.Split(key,"/")
+		parts := strings.Split(key, "/")
 		if len(parts) != 2 {
 			continue
 		}
 		if parts[0] == service {
-			table = append(table,[]string{parts[1], fmt.Sprintf("%s...",token[0:10]),"???","???"})
+			table.AddRow("").Insert(parts[1], fmt.Sprintf("%s...", token[0:10]), "???", "???")
 		}
 	}
 
+	buf := bytes.NewBuffer([]byte{})
+	table.Render(buf, false, true, false, lentele.LoadTemplate("classic"))
+
 	return &Response{
-		Status: "success",
-		Payload: fmt.Sprintf("%s\nFollowing instances are permitted for service '%s':\n%s",m.logserver.GetBanner(), service, tableStr(table)),
+		Status:  "success",
+		Payload: buf.String(),
 	}
 }
 
@@ -230,13 +222,13 @@ func (m *managementConsole) CmdTokensListServices(args Args) *Response {
 	// Prepare statistics
 	serviceNames := []string{}
 	services := map[string][2]int{}
-	for key, _ := range m.logserver.tokens {
-		parts := strings.Split(key,"/")
+	for key := range m.logserver.tokens {
+		parts := strings.Split(key, "/")
 		if len(parts) != 2 {
 			continue
 		}
-		if _,ok := services[parts[0]]; !ok {
-			serviceNames = append(serviceNames,parts[0])
+		if _, ok := services[parts[0]]; !ok {
+			serviceNames = append(serviceNames, parts[0])
 			services[parts[0]] = [2]int{}
 		}
 		counts := services[parts[0]]
@@ -244,27 +236,27 @@ func (m *managementConsole) CmdTokensListServices(args Args) *Response {
 	}
 	sort.Strings(serviceNames)
 
-
-	red := color.New(color.FgRed)
-
-	// Prepare table
-	table := [][]string{}
-	table = append(table,[]string{"","Service", "Instances", "Last log entry", "Log entries parsed"})
-	for _, name := range serviceNames {
-		service := services[name]
-		entry := []string{
-			red.Sprint("●"),
-			name,
-			strconv.Itoa(service[0]),
-			time.Now().Format("2006-01-02 15:04"),
-			strconv.Itoa(service[1])+"/0Mb",
-		}
-		table = append(table,entry)
+	busy := func(v interface{}) interface{} {
+		return color.New(color.FgRed).Sprint(v)
 	}
 
+	// Prepare table
+	table := lentele.New("", "Service", "Instances", "Last log entry", "Log entries parsed")
+	table.AddTitle("Permitted services")
+	for _, name := range serviceNames {
+		service := services[name]
+		now := time.Now().Format("2006-01-02 15:04")
+
+		table.AddRow("").Insert("●", name, service[0], now, service[1]).Modify(busy, "")
+
+	}
+
+	buf := bytes.NewBuffer([]byte{})
+	table.Render(buf, false, true, false, lentele.LoadTemplate("classic"))
+
 	return &Response{
-		Status: "success",
-		Payload: fmt.Sprintf("%s\nFollowing services are permitted:\n%s",m.logserver.GetBanner(), tableStr(table)),
+		Status:  "success",
+		Payload: buf.String(),
 	}
 }
 

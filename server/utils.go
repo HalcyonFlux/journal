@@ -2,67 +2,74 @@ package server
 
 import (
 	"fmt"
+	"github.com/fatih/color"
+	context "golang.org/x/net/context"
+	metadata "google.golang.org/grpc/metadata"
+	"os"
+	"path/filepath"
 	"strings"
-	"unicode/utf8"
 )
 
-// boxStr puts a string in a box
-func boxStr(value string) string {
-	length := utf8.RuneCountInString(value)
-	lines := fmt.Sprintf("+%s+", strings.Repeat("-", length+2))
-	content := fmt.Sprintf("| %s |", value)
+// Extracts service, instance and token from the grpc context
+func extractCaller(ctx context.Context) (service, instance, key, token string, err error) {
 
-	return fmt.Sprintf("%s\n%s\n%s", lines, content, lines)
+	// Verify presence of metadata
+	md, ok := metadata.FromContext(ctx)
+	if !ok {
+		return "", "", "", "", fmt.Errorf("Authorize: missing metadata")
+	}
+
+	// Verify that all required items are available
+	for _, key := range []string{"service", "instance", "token"} {
+		if slice, okKey := md[key]; !okKey || len(slice) != 1 {
+			return "", "", "", "", fmt.Errorf("Authorize: missing %s", key)
+		}
+	}
+
+	// Extract the real token
+	service = md["service"][0]
+	instance = md["instance"][0]
+	key = fmt.Sprintf("%s/%s", strings.ToLower(service), strings.ToLower(instance))
+	token = md["token"][0]
+
+	return service, instance, key, token, nil
 }
 
-// tableStr turns a slice of string slices into a table
-func tableStr(table [][]string) string {
+// Verifies that a file exist
+func fileExists(filename string) error {
 
-	if len(table) == 0 || len(table[0]) == 0 {
-		return "No rows found"
-	}
+	// File dir
+	dirPath := filepath.Dir(filename)
 
-	rows := len(table)
-	columns := len(table[0])
-
-	// Max widths
-	widths := make([]int, columns)
-	for _, row := range table {
-		for j, value := range row {
-			if width := utf8.RuneCountInString(value); width > widths[j] {
-				widths[j] = width
-			}
+	// Make sure dir and file exist
+	if dir, err := os.Stat(dirPath); os.IsNotExist(err) {
+		if err := os.MkdirAll(dirPath, 0700); err != nil {
+			return fmt.Errorf("fileExists: directory to store tokens.db could not be created: %s", err.Error())
 		}
+	} else if !dir.IsDir() {
+		return fmt.Errorf("fileExists: token path is not a directory")
 	}
 
-	// Row border
-	headrowBorder := "+"
-	rowBorder := "+"
-	for _, width := range widths {
-		headrowBorder += strings.Repeat("=", width+2) + "+"
-		rowBorder += strings.Repeat("-", width+2) + "+"
-	}
-
-	// Table contents
-	prettyTable := []string{}
-	for i := 0; i < rows; i++ {
-		row := table[i]
-
-		rowText := "|"
-		for j := 0; j < columns; j++ {
-      vallen :=  utf8.RuneCountInString(row[j])
-			reps := int((widths[j] + 2 - vallen) / 2)
-			space1 := strings.Repeat(" ", reps)
-      space2 := strings.Repeat(" ", widths[j] + 2 - vallen - reps)
-			rowText += fmt.Sprintf("%s%s%s|", space1, row[j], space2)
+	// Make sure the file exists
+	if d, err := os.Stat(filename); os.IsNotExist(err) {
+		f, errF := os.Create(filename)
+		if errF != nil {
+			return fmt.Errorf("fileExists: could not create token db: %s", err.Error())
 		}
-		if i == 0 {
-			prettyTable = append(prettyTable, headrowBorder, rowText, headrowBorder)
-		} else {
-			prettyTable = append(prettyTable, rowBorder, rowText, rowBorder)
-		}
+		return f.Close()
+	} else if d.IsDir() {
+		return fmt.Errorf("fileExists: no filename provided?")
 	}
 
-	return strings.Join(prettyTable, "\n")
+	return nil
+}
 
+// getCleanKey cleans inputs and builds from them a service/instance key
+func getCleanKey(service, instance string) string {
+	return strings.ToLower(fmt.Sprintf("%s/%s", strings.TrimSpace(service), strings.TrimSpace(instance)))
+}
+
+// bold returns a bolded version of v
+func bold(v interface{}) interface{} {
+	return color.New(color.Bold).Sprint(v)
 }

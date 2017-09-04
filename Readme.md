@@ -1,6 +1,6 @@
-# Log
+# Journal
 
-Package `log` is intended to be a very simple, but somewhat flexible logging
+Package `journal` is intended to be a very simple, but somewhat flexible logging
 facility for golang services.
 
 Main attributes:

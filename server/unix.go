@@ -1,7 +1,6 @@
 package server
 
 import (
-	"fmt"
 	"net"
 )
 
@@ -37,5 +36,4 @@ Loop:
 
 	}
 
-	fmt.Println("Conn closed")
 }

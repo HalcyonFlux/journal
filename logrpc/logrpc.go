@@ -21,5 +21,5 @@ func (c *TokenCred) GetRequestMetadata(context.Context, ...string) (map[string]s
 
 // RequireTransportSecurity returns transport security preferences
 func (c *TokenCred) RequireTransportSecurity() bool {
-	return true
+	return false
 }

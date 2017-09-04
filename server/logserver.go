@@ -2,125 +2,19 @@ package server
 
 import (
 	"fmt"
-	"github.com/vaitekunas/log"
-	"github.com/vaitekunas/log/logrpc"
+	"github.com/vaitekunas/journal"
+	"github.com/vaitekunas/journal/logrpc"
 	"net"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
 	context "golang.org/x/net/context"
 	grpc "google.golang.org/grpc"
-	metadata "google.golang.org/grpc/metadata"
 )
 
 // killswitch is used to close all goroutines
 type killswitch chan<- bool
-
-// Statistic contains various log-related statistics
-type Statistic struct {
-	Service         string
-	Instance        string
-	LogsParsed      [24]int64
-	LogsParsedBytes [24]int64
-	LastIP          string
-	LastActive      time.Time
-}
-
-// LogServer implements log.Logger and log.RemoteLoggerServer interfaces
-type LogServer struct {
-	banner string         // Banner for the management console
-	logger *log.Logger    // Local logger
-	server *grpc.Server   // gRPC server
-	wg     sync.WaitGroup // Waitgroup for the unix and grpc listeners
-
-	unixSockPath string       // Path to the unix socket file
-	listenUnix   net.Listener // Unix-socket listener (unix)
-	listenTCP    net.Listener // TCP listener (grpc)
-
-	killswitches []killswitch
-
-	tokens   map[string]string // Authorization tokens map[service]map[instance]token
-	quitChan chan bool         // Internal kill switch
-}
-
-// RemoteLog handles incoming remote logs
-func (l *LogServer) RemoteLog(ctx context.Context, logEntry *logrpc.LogEntry) (*logrpc.Nothing, error) {
-	// TODO: register last IP and amount of logs parsed
-	if err := l.logger.RawEntry(logEntry.Entry); err != nil {
-		return nil, fmt.Errorf("RemoteLog: could not process raw log: %s", err.Error())
-	}
-	return nil, nil
-}
-
-// Authorize is a gRPC interceptor that authorizes incoming RPCs
-func (l *LogServer) Authorize(ctx context.Context) error {
-
-	// Verify presence of metadata
-	md, ok := metadata.FromContext(ctx)
-	if !ok {
-		return fmt.Errorf("Authorize: missing metadata")
-	}
-
-	// Verify that all required items are available
-	for _, key := range []string{"service", "instance", "token"} {
-		if slice, okKey := md[key]; !okKey || len(slice) != 1 {
-			return fmt.Errorf("Authorize: missing %s", key)
-		}
-	}
-
-	// Extract the real token
-	service := md["service"][0]
-	instance := md["instance"][0]
-	key := fmt.Sprintf("%s/%s", strings.ToLower(service), strings.ToLower(instance))
-	token := md["token"][0]
-
-	realToken, ok := l.tokens[key]
-	if !ok {
-		return fmt.Errorf("Authorize: unknown service/instance")
-	}
-
-	// Authorize
-	if realToken != token {
-		return fmt.Errorf("Authorize: bad token")
-	}
-
-	return nil
-}
-
-// GatherStatistics saves log-related statistics
-func (l *LogServer) GatherStatistics(service, instance string, entry *logrpc.LogEntry) {
-
-}
-
-// KillSwitch returns the internal killswitch
-func (l *LogServer) KillSwitch() chan bool {
-	return l.quitChan
-}
-
-// GetBanner returns server's banner
-func (l *LogServer) GetBanner() string {
-	return l.banner
-}
-
-// Quit stops the server and all goroutines
-func (l *LogServer) Quit() {
-
-	for _, quitChan := range l.killswitches {
-		quitChan <- true
-	}
-
-	if err := l.listenUnix.Close(); err != nil {
-		fmt.Printf("Quit: could not close unix-socket listener: %s\n", err.Error())
-	}
-
-	if err := l.listenTCP.Close(); err != nil {
-		fmt.Printf("Quit: could not close tcp-socket listener: %s\n", err.Error())
-	}
-
-	l.wg.Wait()
-}
 
 // Config contains all the configuration for the remote logger
 type Config struct {
@@ -131,17 +25,19 @@ type Config struct {
 	UnixSockPath string
 	TokenPath    string
 	StatsPath    string
-	Banner       string
 
 	// Local logger config
-	LoggerConfig *log.Config
+	LoggerConfig *journal.Config
 }
 
 // New creates a new logserver instance
 func New(config *Config) (*LogServer, error) {
 
 	// Instantiate remote logserver
-	rLogger := &LogServer{banner: config.Banner}
+	rLogger := &LogServer{Mutex: &sync.Mutex{}}
+
+	// Internal context used to cancel supporting goroutines
+	internalCTX, cancel := context.WithCancel(context.Background())
 
 	// Listen on to the unix socket
 	listenUnix, err := net.Listen("unix", config.UnixSockPath)
@@ -150,17 +46,21 @@ func New(config *Config) (*LogServer, error) {
 	}
 
 	// Serve socket requests
-	quitChan, connChan := make(chan bool, 1), make(chan net.Conn, 1)
-	rLogger.killswitches = append(rLogger.killswitches, quitChan)
+	connChan := make(chan net.Conn, 1)
 
 	// Listen for incoming unix connections
 	go func() {
+	Loop:
 		for {
 			fd, errUnix := listenUnix.Accept()
 			if errUnix != nil {
 				continue
 			}
-			connChan <- fd
+			select {
+			case connChan <- fd:
+			case <-internalCTX.Done():
+				break Loop
+			}
 		}
 	}()
 
@@ -171,7 +71,7 @@ func New(config *Config) (*LogServer, error) {
 			select {
 			case conn := <-connChan:
 				go rLogger.HandleUnixRequest(conn)
-			case <-quitChan:
+			case <-internalCTX.Done():
 				break Loop
 			}
 		}
@@ -193,24 +93,40 @@ func New(config *Config) (*LogServer, error) {
 	}
 
 	// Put everything together
+	rLogger.cancelSupport = cancel
 	rLogger.unixSockPath = config.UnixSockPath
 	rLogger.listenUnix = listenUnix
 	rLogger.listenTCP = listenTCP
+	rLogger.statsPath = config.StatsPath
+	rLogger.tokenPath = config.TokenPath
 	rLogger.server = grpc.NewServer(grpc.UnaryInterceptor(intercept))
+	rLogger.stats = make(map[string]*Statistic)
 	rLogger.tokens = make(map[string]string)
 	rLogger.quitChan = make(chan bool, 1)
 
+	// Load auth tokens from disk
+	if errToken := rLogger.loadTokensFromDisk(); errToken != nil {
+		return nil, fmt.Errorf("New: could not load tokens from disk: %s", errToken.Error())
+	}
+
+	// Load statistics from disk
+	if errStats := rLogger.loadStatisticsFromDisk(); errStats != nil {
+		return nil, fmt.Errorf("New: could not load statistics from disk: %s", errStats.Error())
+	}
+
+	// Periodically dump statistics to file
+	go rLogger.periodicallyDumpStats(internalCTX, 60*time.Second)
+
 	// Serve gRPC requests
 	logrpc.RegisterRemoteLoggerServer(rLogger.server, rLogger)
-	quitChan, failChan := make(chan bool, 1), make(chan error, 1)
-	rLogger.killswitches = append(rLogger.killswitches, quitChan)
+	failChan := make(chan error, 1)
 	go func() {
 		if errTCP := rLogger.server.Serve(listenTCP); errTCP != nil {
 			failChan <- errTCP
 		}
 	}()
 
-	// Quit if gRPC server fails
+	// Quit if gRPC server fails (wait for 60 seconds to be sure)
 	go func() {
 		select {
 		case errTCP := <-failChan:
@@ -219,24 +135,119 @@ func New(config *Config) (*LogServer, error) {
 				rLogger.Quit()
 				os.Exit(1)
 			}
-		case <-time.After(10 * time.Second):
+		case <-time.After(60 * time.Second):
 		}
 	}()
 
 	// Wait for gRPC server to start up
-	//rLogger.wg.Add(1)
 	go func() {
-		<-quitChan
+		<-internalCTX.Done()
 		rLogger.server.Stop()
-		//rLogger.wg.Done()
 	}()
 
 	// Instantiate logger
-	logger, err := log.New(config.LoggerConfig)
+	logger, err := journal.New(config.LoggerConfig)
 	if err != nil {
 		return nil, fmt.Errorf("New: could not start logger: %s", err.Error())
 	}
 	rLogger.logger = logger
 
 	return rLogger, nil
+}
+
+// Statistic contains various log-related statistics
+type Statistic struct {
+	Service         string
+	Instance        string
+	LogsParsed      [24]int64
+	LogsParsedBytes [24]int64
+	LastIP          string
+	LastActive      time.Time
+}
+
+// LogServer implements log.Logger and log.RemoteLoggerServer interfaces
+type LogServer struct {
+	*sync.Mutex // Mutex for tokens and statistics
+
+	logger *journal.Logger // Local logger
+	server *grpc.Server    // gRPC server
+
+	unixSockPath string       // Path to the unix socket file
+	listenUnix   net.Listener // Unix-socket listener (unix)
+	listenTCP    net.Listener // TCP listener (grpc)
+
+	cancelSupport func() // Internal context cancel function to stop all supporting goroutines
+
+	statsPath string                // A path to the file where all the statistics are kept
+	stats     map[string]*Statistic // Log statistics map[service/instance]*Statistic
+
+	tokenPath string            // A path to the file where all the tokens are kept
+	tokens    map[string]string // Authorization tokens map[service/instance]token
+
+	quitChan chan bool // Internal kill switch
+}
+
+// RemoteLog handles incoming remote logs
+func (l *LogServer) RemoteLog(ctx context.Context, logEntry *logrpc.LogEntry) (*logrpc.Nothing, error) {
+
+	// Extract credentials
+	service, instance, key, _, err := extractCaller(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("RemoteLog: could not extract caller credentials")
+	}
+
+	// Update statistics
+	go l.GatherStatistics(service, instance, key, logEntry)
+
+	// Push entry into the log entry channel
+	if err := l.logger.RawEntry(logEntry.GetEntry()); err != nil {
+		return nil, fmt.Errorf("RemoteLog: could not process raw log: %s", err.Error())
+	}
+
+	return &logrpc.Nothing{}, nil
+}
+
+// Authorize is a gRPC interceptor that authorizes incoming RPCs
+func (l *LogServer) Authorize(ctx context.Context) error {
+
+	// Verify presence of metadata
+	_, _, key, token, err := extractCaller(ctx)
+	if err != nil {
+		return fmt.Errorf("Authorize: cannot extract caller credentials :%s", err.Error())
+	}
+
+	// Get existing token
+	realToken, ok := l.tokens[key]
+	if !ok {
+		return fmt.Errorf("Authorize: unknown service/instance")
+	}
+
+	// Authorize
+	if realToken != token {
+		return fmt.Errorf("Authorize: bad token")
+	}
+
+	return nil
+}
+
+// KillSwitch returns the internal killswitch
+func (l *LogServer) KillSwitch() chan bool {
+	return l.quitChan
+}
+
+// Quit stops the server and all goroutines
+func (l *LogServer) Quit() {
+
+	// Stop all supporting goroutines
+	l.cancelSupport()
+
+	// Close unix listener
+	if err := l.listenUnix.Close(); err != nil {
+		fmt.Printf("Quit: could not close unix-socket listener: %s\n", err.Error())
+	}
+
+	// Close TCP listener
+	if err := l.listenTCP.Close(); err != nil {
+		fmt.Printf("Quit: could not close tcp-socket listener: %s\n", err.Error())
+	}
 }

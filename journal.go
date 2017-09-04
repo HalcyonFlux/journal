@@ -1,9 +1,9 @@
-package log
+package journal
 
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/vaitekunas/log/logrpc"
+	"github.com/vaitekunas/journal/logrpc"
 	"io"
 	"os"
 	"sync"

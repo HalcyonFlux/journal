@@ -15,7 +15,7 @@ type Args map[string]interface{}
 // Response contains a response from the UnixManager
 type Response struct {
 	Status  string `json:"status"`
-	Error   error  `json:"error"`
+	Error   string `json:"error"`
 	Payload string `json:"payload"`
 }
 
@@ -27,7 +27,7 @@ type SocketMessage interface {
 
 	// Receive reads all the data (a SocketMEssage) from a unix socket and stores
 	// all the content inside the receiving SocketMessage
- 	Receive() error
+	Receive() error
 
 	// Send sends this SocketMessage over the unix socket
 	Send() error
@@ -78,11 +78,11 @@ func newMessage(conn net.Conn, cmd string, args Args, resp *Response, respond, c
 
 // socketMessage represents a command sent over the unix socket
 type socketMessage struct {
-	Cmd      string   `json:"cmd"`      // Command
-	Args     Args     `json:"args"`     // Command arguments
+	Cmd      string    `json:"cmd"`      // Command
+	Args     Args      `json:"args"`     // Command arguments
 	Response *Response `json:"response"` // Response to a message
-	Respond  bool     `json:"respond"`  // Respond after receiving
-	Close    bool     `json:"close"`    // Close connection after receiving
+	Respond  bool      `json:"respond"`  // Respond after receiving
+	Close    bool      `json:"close"`    // Close connection after receiving
 
 	conn      net.Conn      // Unix socket connection
 	maxLength int           // Maximum size of the reading buffer (1Mb)
@@ -138,7 +138,6 @@ func (s *socketMessage) Receive() error {
 
 	// Set timeout
 	s.conn.SetDeadline(time.Now().Add(s.timeout))
-
 
 	// Retrieve incoming message length
 	length := make([]byte, 4)
