@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/fatih/color"
 	"github.com/vaitekunas/lentele"
+	"github.com/vaitekunas/unixsock"
 	"reflect"
 	"sort"
 	"strings"
@@ -15,37 +16,37 @@ import (
 type ManagementConsole interface {
 
 	// CmdStatistics displays various statistics
-	CmdStatistics(Args) *Response
+	CmdStatistics(unixsock.Args) *unixsock.Response
 
 	// CmdLogsList list all available logfiles and their archives
-	CmdLogsList(Args) *Response
+	CmdLogsList(unixsock.Args) *unixsock.Response
 
 	// CmdRemoteAdd adds a remote backend
-	CmdRemoteAdd(Args) *Response
+	CmdRemoteAdd(unixsock.Args) *unixsock.Response
 
 	// CmdRemoteList lists all active remote backends
-	CmdRemoteList(Args) *Response
+	CmdRemoteList(unixsock.Args) *unixsock.Response
 
 	// CmdRemoteRemove removes a remote backend
-	CmdRemoteRemove(Args) *Response
+	CmdRemoteRemove(unixsock.Args) *unixsock.Response
 
 	// CmdTokensAdd adds a new token for a service/instance
-	CmdTokensAdd(Args) *Response
+	CmdTokensAdd(unixsock.Args) *unixsock.Response
 
 	// CmdTokensListInstances lists all permitted instances of a service
-	CmdTokensListInstances(Args) *Response
+	CmdTokensListInstances(unixsock.Args) *unixsock.Response
 
 	// CmdTokensListServices lists all permitted services
-	CmdTokensListServices(Args) *Response
+	CmdTokensListServices(unixsock.Args) *unixsock.Response
 
 	// CmdTokensRemoveInstance removes the token of a service/instance
-	CmdTokensRemoveInstance(Args) *Response
+	CmdTokensRemoveInstance(unixsock.Args) *unixsock.Response
 
 	// CmdTokensRemoveService removes the token of all instances of a service
-	CmdTokensRemoveService(Args) *Response
+	CmdTokensRemoveService(unixsock.Args) *unixsock.Response
 
 	// Execute is the executor of management console commands
-	Execute(string, Args) *Response
+	Execute(string, unixsock.Args) *unixsock.Response
 }
 
 // NewConsole creates a new management console for the log server
@@ -63,7 +64,7 @@ type managementConsole struct {
 }
 
 // Execute is the executor of management console commands
-func (m *managementConsole) Execute(cmd string, args Args) *Response {
+func (m *managementConsole) Execute(cmd string, args unixsock.Args) *unixsock.Response {
 
 	fmt.Printf(" ▶ [%s] Received command [%s]\n", time.Now().Format("2006-01-02 15:04:05"), bold(strings.ToLower(cmd)))
 
@@ -89,7 +90,7 @@ func (m *managementConsole) Execute(cmd string, args Args) *Response {
 	case "remote.list":
 		return m.CmdRemoteList(args)
 	default:
-		return &Response{
+		return &unixsock.Response{
 			Status: "failure",
 			Error:  fmt.Errorf("Execute: unknown command '%s'", cmd).Error(),
 		}
@@ -104,7 +105,7 @@ type arg struct {
 }
 
 // validArguments verifies that all the required arguments have been provided
-func validArguments(args Args, required []arg) bool {
+func validArguments(args unixsock.Args, required []arg) bool {
 	for _, f := range required {
 		x, ok := args[f.Name]
 		if !ok {
@@ -118,18 +119,18 @@ func validArguments(args Args, required []arg) bool {
 	return true
 }
 
-var respMissingArgs = &Response{
+var respMissingArgs = &unixsock.Response{
 	Status: "failure",
 	Error:  fmt.Errorf("Missing/invalid parameters").Error(),
 }
 
 // CmdStatistics displays various log-related statistics
-func (m *managementConsole) CmdStatistics(args Args) *Response {
-	return &Response{}
+func (m *managementConsole) CmdStatistics(args unixsock.Args) *unixsock.Response {
+	return &unixsock.Response{}
 }
 
 // CmdTokensAdd adds a new token for a service/instance
-func (m *managementConsole) CmdTokensAdd(args Args) *Response {
+func (m *managementConsole) CmdTokensAdd(args unixsock.Args) *unixsock.Response {
 
 	// Validate arguments
 	required := []arg{
@@ -147,7 +148,7 @@ func (m *managementConsole) CmdTokensAdd(args Args) *Response {
 	instance := args["instance"].(string)
 	token, err := m.logserver.AddToken(service, instance)
 	if err != nil {
-		return &Response{
+		return &unixsock.Response{
 			Status: "failure",
 			Error:  fmt.Errorf("Could not add token: %s", err.Error()).Error(),
 		}
@@ -161,7 +162,7 @@ func (m *managementConsole) CmdTokensAdd(args Args) *Response {
 	table.Render(buf, false, true, false, lentele.LoadTemplate("classic"))
 
 	// Successful op
-	return &Response{
+	return &unixsock.Response{
 		Status:  "success",
 		Payload: buf.String(),
 	}
@@ -169,17 +170,17 @@ func (m *managementConsole) CmdTokensAdd(args Args) *Response {
 }
 
 // CmdTokensRemoveInstance removes the token of a service/instance
-func (m *managementConsole) CmdTokensRemoveInstance(args Args) *Response {
-	return &Response{}
+func (m *managementConsole) CmdTokensRemoveInstance(args unixsock.Args) *unixsock.Response {
+	return &unixsock.Response{}
 }
 
 // CmdTokensRemoveService removes the token of all instances of a service
-func (m *managementConsole) CmdTokensRemoveService(args Args) *Response {
-	return &Response{}
+func (m *managementConsole) CmdTokensRemoveService(args unixsock.Args) *unixsock.Response {
+	return &unixsock.Response{}
 }
 
 // CmdTokensListInstances lists all permitted instances of a service
-func (m *managementConsole) CmdTokensListInstances(args Args) *Response {
+func (m *managementConsole) CmdTokensListInstances(args unixsock.Args) *unixsock.Response {
 
 	// Validate arguments
 	required := []arg{
@@ -210,14 +211,14 @@ func (m *managementConsole) CmdTokensListInstances(args Args) *Response {
 	buf := bytes.NewBuffer([]byte{})
 	table.Render(buf, false, true, false, lentele.LoadTemplate("classic"))
 
-	return &Response{
+	return &unixsock.Response{
 		Status:  "success",
 		Payload: buf.String(),
 	}
 }
 
 // CmdTokensListServices lists all permitted services
-func (m *managementConsole) CmdTokensListServices(args Args) *Response {
+func (m *managementConsole) CmdTokensListServices(args unixsock.Args) *unixsock.Response {
 
 	// Prepare statistics
 	serviceNames := []string{}
@@ -254,28 +255,28 @@ func (m *managementConsole) CmdTokensListServices(args Args) *Response {
 	buf := bytes.NewBuffer([]byte{})
 	table.Render(buf, false, true, false, lentele.LoadTemplate("classic"))
 
-	return &Response{
+	return &unixsock.Response{
 		Status:  "success",
 		Payload: buf.String(),
 	}
 }
 
 // CmdLogsList list all available logfiles and their archives
-func (m *managementConsole) CmdLogsList(args Args) *Response {
-	return &Response{}
+func (m *managementConsole) CmdLogsList(args unixsock.Args) *unixsock.Response {
+	return &unixsock.Response{}
 }
 
 // CmdRemoteAdd adds a remote backend
-func (m *managementConsole) CmdRemoteAdd(args Args) *Response {
-	return &Response{}
+func (m *managementConsole) CmdRemoteAdd(args unixsock.Args) *unixsock.Response {
+	return &unixsock.Response{}
 }
 
 // CmdRemoteRemove removes a remote backend
-func (m *managementConsole) CmdRemoteRemove(args Args) *Response {
-	return &Response{}
+func (m *managementConsole) CmdRemoteRemove(args unixsock.Args) *unixsock.Response {
+	return &unixsock.Response{}
 }
 
 // CmdRemoteList lists all active remote backends
-func (m *managementConsole) CmdRemoteList(args Args) *Response {
-	return &Response{}
+func (m *managementConsole) CmdRemoteList(args unixsock.Args) *unixsock.Response {
+	return &unixsock.Response{}
 }

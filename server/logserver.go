@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/vaitekunas/journal"
 	"github.com/vaitekunas/journal/logrpc"
+	unixsrv "github.com/vaitekunas/unixsock/server"
 	"net"
 	"os"
 	"sync"
@@ -39,48 +40,17 @@ func New(config *Config) (*LogServer, error) {
 	// Internal context used to cancel supporting goroutines
 	internalCTX, cancel := context.WithCancel(context.Background())
 
-	// Listen on to the unix socket
-	listenUnix, err := net.Listen("unix", config.UnixSockPath)
+	// Start the unix domain socket server
+	manager := NewConsole(rLogger)
+	sockSrv, err := unixsrv.New(config.UnixSockPath, manager.Execute)
 	if err != nil {
-		return nil, fmt.Errorf("New: could not listen on the unix socket: %s", err.Error())
+		return nil, fmt.Errorf("New: could not listen on the unix domain socket: %s", err.Error())
 	}
-
-	// Serve socket requests
-	connChan := make(chan net.Conn, 1)
-
-	// Listen for incoming unix connections
-	go func() {
-	Loop:
-		for {
-			fd, errUnix := listenUnix.Accept()
-			if errUnix != nil {
-				continue
-			}
-			select {
-			case connChan <- fd:
-			case <-internalCTX.Done():
-				break Loop
-			}
-		}
-	}()
-
-	// Process unix connections
-	go func() {
-	Loop:
-		for {
-			select {
-			case conn := <-connChan:
-				go rLogger.HandleUnixRequest(conn)
-			case <-internalCTX.Done():
-				break Loop
-			}
-		}
-	}()
 
 	// Listen on tcp
 	listenTCP, err := net.Listen("tcp", fmt.Sprintf(":%d", config.Port))
 	if err != nil {
-		listenUnix.Close()
+		sockSrv.Stop()
 		return nil, fmt.Errorf("New: could not listen on tcp socket: %s", err.Error())
 	}
 
@@ -95,7 +65,7 @@ func New(config *Config) (*LogServer, error) {
 	// Put everything together
 	rLogger.cancelSupport = cancel
 	rLogger.unixSockPath = config.UnixSockPath
-	rLogger.listenUnix = listenUnix
+	rLogger.unixsrv = sockSrv
 	rLogger.listenTCP = listenTCP
 	rLogger.statsPath = config.StatsPath
 	rLogger.tokenPath = config.TokenPath
@@ -172,9 +142,9 @@ type LogServer struct {
 	logger *journal.Logger // Local logger
 	server *grpc.Server    // gRPC server
 
-	unixSockPath string       // Path to the unix socket file
-	listenUnix   net.Listener // Unix-socket listener (unix)
-	listenTCP    net.Listener // TCP listener (grpc)
+	unixSockPath string              // Path to the unix socket file
+	unixsrv      unixsrv.UnixSockSrv // UNIX domain socket server
+	listenTCP    net.Listener        // TCP listener (grpc)
 
 	cancelSupport func() // Internal context cancel function to stop all supporting goroutines
 
@@ -242,9 +212,7 @@ func (l *LogServer) Quit() {
 	l.cancelSupport()
 
 	// Close unix listener
-	if err := l.listenUnix.Close(); err != nil {
-		fmt.Printf("Quit: could not close unix-socket listener: %s\n", err.Error())
-	}
+	l.unixsrv.Stop()
 
 	// Close TCP listener
 	if err := l.listenTCP.Close(); err != nil {

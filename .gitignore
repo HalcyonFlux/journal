@@ -1,2 +1,5 @@
 # Protobuf generated files
 *.pb.go
+
+# Test files
+*.coverprofile
