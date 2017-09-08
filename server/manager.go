@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"reflect"
-	"sort"
 	"strings"
-	"time"
 
 	"github.com/fatih/color"
 	"github.com/vaitekunas/lentele"
@@ -138,75 +136,22 @@ var respMissingArgs = &unixsock.Response{
 
 // CmdStatistics displays various log-related statistics
 func (m *managementConsole) CmdStatistics(args unixsock.Args) *unixsock.Response {
-	m.logserver.Lock()
-	defer m.logserver.Unlock()
 
-	type aggregate struct {
-		service   string
-		instances int
-		volume    int64
-		logs      int64
-		share     float64
-	}
-
-	hourlyLogs := [24]int64{}
-	hourlyVolume := [24]int64{}
-	hourlyVolumeShare := make([]float64, 24)
-	hours := make([]interface{}, 24)
-
-	// Aggregate data
-	var totalLogVolume int64
-	serviceAggroMap := map[string]*aggregate{}
-	serviceNames := []string{}
-	for _, stats := range m.logserver.stats {
-
-		service := stats.Service
-		_, _, plogs, pbytes := parsedSums(stats.LogsParsed, stats.LogsParsedBytes)
-
-		serviceAggro, ok := serviceAggroMap[service]
-		if !ok {
-			serviceNames = append(serviceNames, service)
-			serviceAggro = &aggregate{service: service}
-			serviceAggroMap[service] = serviceAggro
-		}
-
-		// Hourly statistics
-		for i := 0; i < 24; i++ {
-			hourlyLogs[i] += stats.LogsParsed[i]
-			hourlyVolume[i] += stats.LogsParsedBytes[i]
-		}
-
-		serviceAggro.instances++
-		serviceAggro.logs += plogs
-		serviceAggro.volume += pbytes
-
-		totalLogVolume += pbytes
-	}
-
-	// Calculate shares
-	shares := make([]float64, len(serviceNames))
-	i := 0
-	for _, stsum := range serviceAggroMap {
-		stsum.share = float64(stsum.volume) / float64(totalLogVolume)
-		shares[i] = stsum.share
-		i++
-	}
+	// Get aggregated statistics
+	totalLogVolume, aggro, hourly := m.logserver.AggregateServiceStatistics()
 
 	// Service table
 	serviceTable := lentele.New("Service", "Instances", "Logs sent", "Volume share")
-	shareSort := &floatSorter{floats: shares}
-	sort.Sort(shareSort)
-	idx := shareSort.GetIndexes()
-	for i := range idx {
-		service := serviceNames[i]
-		mp := serviceAggroMap[service]
-		plogStr, pbyteStr := prettyParsedSums(mp.logs, mp.volume)
-		serviceTable.AddRow("").Insert(service, mp.instances, fmt.Sprintf("%s (%s)", plogStr, pbyteStr), fmt.Sprintf("%6.2f%%", mp.share*100))
+	for _, service := range aggro {
+		plogStr, pbyteStr := prettyParsedSums(service.logs, service.volume)
+		serviceTable.AddRow("").Insert(service.service, service.instances, fmt.Sprintf("%s (%s)", plogStr, pbyteStr), fmt.Sprintf("%6.2f%%", service.share*100))
 	}
 
 	// Hourly table
 	hourlyTable := lentele.New("Hour", "Logs sent", "Volume", "Volume share")
-	for i := 0; i < 24; i++ {
+	hourlyVolumeShare := make([]float64, 24)
+	hours := make([]interface{}, 24)
+	for i, stats := range hourly {
 
 		var hour string
 		if i < 10 {
@@ -216,12 +161,13 @@ func (m *managementConsole) CmdStatistics(args unixsock.Args) *unixsock.Response
 		}
 		hours[i] = hour
 
-		plogsStr, pbytesStr := prettyParsedSums(hourlyLogs[i], hourlyVolume[i])
-		share := float64(hourlyVolume[i]) / float64(totalLogVolume)
-
-		row := hourlyTable.AddRow("")
+		plogsStr, pbytesStr := prettyParsedSums(stats[0], stats[1])
+		share := float64(stats[1]) / float64(totalLogVolume)
 		hourlyVolumeShare[i] = share
-		row.Insert(hour, plogsStr, pbytesStr, fmt.Sprintf("%6.2f%%", share*100))
+		if stats[0] > 0 {
+			row := hourlyTable.AddRow("")
+			row.Insert(hour, plogsStr, pbytesStr, fmt.Sprintf("%6.2f%%", share*100))
+		}
 	}
 
 	// Print tables and barchart
@@ -355,13 +301,16 @@ func (m *managementConsole) CmdTokensListInstances(args unixsock.Args) *unixsock
 		return respMissingArgs
 	}
 
+	// Lock tokens
+	m.logserver.Lock()
+	defer m.logserver.Unlock()
+
 	// Identify service
 	service := strings.ToLower(args["service"].(string))
 
 	// Prepare table
 	table := lentele.New("Instance", "Token", "Last known IP", "Logs sent")
 
-	m.logserver.Lock()
 	for key, token := range m.logserver.tokens {
 		parts := strings.Split(key, "/")
 		if len(parts) != 2 {
@@ -376,7 +325,6 @@ func (m *managementConsole) CmdTokensListInstances(args unixsock.Args) *unixsock
 			table.AddRow("").Insert(parts[1], fmt.Sprintf("%s...", token[0:10]), ip, fmt.Sprintf("%s (%s)", plogsStr, pbytesStr))
 		}
 	}
-	m.logserver.Unlock()
 
 	buf := bytes.NewBuffer([]byte{})
 	table.Render(buf, false, true, false, lentele.LoadTemplate("classic"))
@@ -390,35 +338,14 @@ func (m *managementConsole) CmdTokensListInstances(args unixsock.Args) *unixsock
 // CmdTokensListServices lists all permitted services
 func (m *managementConsole) CmdTokensListServices(args unixsock.Args) *unixsock.Response {
 
-	// Prepare statistics
-	serviceNames := []string{}
-	services := map[string][2]int{}
-	for key := range m.logserver.tokens {
-		parts := strings.Split(key, "/")
-		if len(parts) != 2 {
-			continue
-		}
-		if _, ok := services[parts[0]]; !ok {
-			serviceNames = append(serviceNames, parts[0])
-			services[parts[0]] = [2]int{}
-		}
-		counts := services[parts[0]]
-		counts[0]++
-	}
-	sort.Strings(serviceNames)
+	// Get aggregated statistics
+	_, aggro, _ := m.logserver.AggregateServiceStatistics()
 
-	busy := func(v interface{}) interface{} {
-		return color.New(color.FgRed).Sprint(v)
-	}
-
-	// Prepare table
-	table := lentele.New("", "Service", "Instances", "Last log entry", "Log entries parsed")
-	for _, name := range serviceNames {
-		service := services[name]
-		now := time.Now().Format("2006-01-02 15:04")
-
-		table.AddRow("").Insert("●", name, service[0], now, service[1]).Modify(busy, "")
-
+	// Service table
+	table := lentele.New("Service", "Instances", "Logs sent", "Volume share")
+	for _, service := range aggro {
+		plogStr, pbyteStr := prettyParsedSums(service.logs, service.volume)
+		table.AddRow("").Insert(service.service, service.instances, fmt.Sprintf("%s (%s)", plogStr, pbyteStr), fmt.Sprintf("%6.2f%%", service.share*100))
 	}
 
 	buf := bytes.NewBuffer([]byte{})
@@ -426,7 +353,7 @@ func (m *managementConsole) CmdTokensListServices(args unixsock.Args) *unixsock.
 
 	return &unixsock.Response{
 		Status:  "success",
-		Payload: buf.String(),
+		Payload: console(fmt.Sprintf("available services:\n%s", buf.String())),
 	}
 }
 

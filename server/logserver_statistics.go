@@ -3,10 +3,12 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/vaitekunas/journal/logrpc"
 	"io/ioutil"
 	"os"
+	"sort"
 	"time"
+
+	"github.com/vaitekunas/journal/logrpc"
 
 	context "golang.org/x/net/context"
 )
@@ -37,6 +39,68 @@ func (l *LogServer) GatherStatistics(service, instance, key, ip string, logEntry
 	stats.LogsParsedBytes[now.Hour()] += int64(len(jsoned))
 	stats.LastIP = ip
 	stats.LastActive = now
+}
+
+// AggregateStatistics contains aggregated logging statistics
+type AggregateStatistics struct {
+	service   string
+	instances int
+	volume    int64
+	logs      int64
+	share     float64
+}
+
+// AggregateServiceStatistics aggregates statistics
+func (l *LogServer) AggregateServiceStatistics() (totalVolume int64, services []*AggregateStatistics, hourly [24][2]int64) {
+	l.Lock()
+	defer l.Unlock()
+
+	// Aggregate data
+	var totalLogVolume int64
+	serviceAggroMap := map[string]*AggregateStatistics{}
+	serviceNames := []string{}
+	hourly = [24][2]int64{}
+	for _, stats := range l.stats {
+
+		service := stats.Service
+		_, _, plogs, pbytes := parsedSums(stats.LogsParsed, stats.LogsParsedBytes)
+
+		serviceAggro, ok := serviceAggroMap[service]
+		if !ok {
+			serviceNames = append(serviceNames, service)
+			serviceAggro = &AggregateStatistics{service: service}
+			serviceAggroMap[service] = serviceAggro
+		}
+
+		for i := 0; i <= 23; i++ {
+			hourly[i][0] += stats.LogsParsed[i]
+			hourly[i][1] += stats.LogsParsedBytes[i]
+		}
+
+		serviceAggro.instances++
+		serviceAggro.logs += plogs
+		serviceAggro.volume += pbytes
+
+		totalLogVolume += pbytes
+	}
+
+	// Calculate shares
+	shares := make([]float64, len(serviceNames))
+	for i, name := range serviceNames {
+		stsum := serviceAggroMap[name]
+		stsum.share = float64(stsum.volume) / float64(totalLogVolume)
+		shares[i] = stsum.share
+	}
+
+	// Sort by share
+	shareSort := &floatSorter{floats: shares}
+	sort.Sort(shareSort)
+	aggro := make([]*AggregateStatistics, len(shares))
+	for i := range shareSort.GetIndexes() {
+		aggro[i] = serviceAggroMap[serviceNames[i]]
+	}
+
+	return totalLogVolume, aggro, hourly
 }
 
 // periodicallyDumpStats periodically dumps statistics to file
