@@ -42,7 +42,7 @@ func init() {
 		c10(`  d88P`),
 		c11(`888P`),
 		c12(``),
-		c13(`v0.1.0`),
+		c13(VERSION),
 	}
 
 	banner = strings.Join(bannerSlice, "\n")

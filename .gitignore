@@ -1,3 +1,7 @@
+# journald version file
+cmd/journald/version.go
+cmd/journald/journald
+
 # Protobuf generated files
 *.pb.go
 
