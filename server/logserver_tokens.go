@@ -45,10 +45,36 @@ func (l *LogServer) AddToken(service, instance string) (string, error) {
 	return token, nil
 }
 
-// RemoveToken removes an authentication token
-func (l *LogServer) RemoveToken(service, instance string) error {
+// RemoveTokens removes all the authentication tokens of a service
+func (l *LogServer) RemoveTokens(service string) error {
 	l.Lock()
 	defer l.Unlock()
+
+	// Identify all the keys belonging to a service
+	keys := []string{}
+	for key := range l.tokens {
+		if parts := strings.Split(key, "/"); parts[0] == service {
+			keys = append(keys, key)
+		}
+	}
+
+	// Remove keys one by one
+	for _, key := range keys {
+		parts := strings.Split(key, "/")
+		if err := l.RemoveToken(parts[0], parts[1], false); err != nil {
+			return fmt.Errorf("RemoveTokens: could not remove token for key '%s': %s", key, err.Error())
+		}
+	}
+
+	return nil
+}
+
+// RemoveToken removes an authentication token
+func (l *LogServer) RemoveToken(service, instance string, lock bool) error {
+	if lock {
+		l.Lock()
+		defer l.Unlock()
+	}
 
 	// Clean the key
 	key := getCleanKey(service, instance)
@@ -80,7 +106,7 @@ func (l *LogServer) writeTokenToFile(key, token string) error {
 	// Write to file
 	f, err := os.OpenFile(l.tokenPath, os.O_WRONLY|os.O_APPEND, 0600)
 	if err == nil {
-		if _, err := f.WriteString(fmt.Sprintf("%s\t%s\n", key, token)); err != nil {
+		if _, err = f.WriteString(fmt.Sprintf("%s\t%s\n", key, token)); err != nil {
 			return fmt.Errorf("writeTokenToFile: could not write token to file: %s", err.Error())
 		}
 	} else {
@@ -123,7 +149,7 @@ func (l *LogServer) removeTokenFromFile(key string, lock bool) error {
 		if len(keyParts) != 2 {
 			continue
 		}
-		fmt.Printf("'%s' '%s' '%t'\n", parts[0], key, parts[0] != key)
+
 		if parts[0] != key {
 			tokens = append(tokens, line)
 		}
@@ -138,7 +164,7 @@ func (l *LogServer) removeTokenFromFile(key string, lock bool) error {
 		return fmt.Errorf("removeTokenFromFile: could not rewrite token database: %s", err.Error())
 	}
 
-	return f.Close()
+	return nil
 }
 
 // loadTokensFromDisk loads all the tokens from disk to memory

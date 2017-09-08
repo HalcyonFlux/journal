@@ -298,7 +298,7 @@ func (m *managementConsole) CmdTokensRemoveInstance(args unixsock.Args) *unixsoc
 	// Identify service/instance
 	service := args["service"].(string)
 	instance := args["instance"].(string)
-	if err := m.logserver.RemoveToken(service, instance); err != nil {
+	if err := m.logserver.RemoveToken(service, instance, true); err != nil {
 		return &unixsock.Response{
 			Status: "failure",
 			Error:  fmt.Errorf("Could not remove token: %s", err.Error()).Error(),
@@ -315,7 +315,32 @@ func (m *managementConsole) CmdTokensRemoveInstance(args unixsock.Args) *unixsoc
 
 // CmdTokensRemoveService removes the token of all instances of a service
 func (m *managementConsole) CmdTokensRemoveService(args unixsock.Args) *unixsock.Response {
-	return &unixsock.Response{}
+
+	// Validate arguments
+	required := []arg{
+		arg{"service", reflect.String},
+	}
+
+	// Validate arguments
+	if !validArguments(args, required) {
+		return respMissingArgs
+	}
+
+	// Identify service/instance
+	service := args["service"].(string)
+	if err := m.logserver.RemoveTokens(service); err != nil {
+		return &unixsock.Response{
+			Status: "failure",
+			Error:  fmt.Errorf("Could not remove tokens for the service '%s': %s", service, err.Error()).Error(),
+		}
+	}
+
+	// Successful op
+	return &unixsock.Response{
+		Status:  "success",
+		Payload: console(fmt.Sprintf("removed all tokens for service '%s'\n", bold(service))),
+	}
+
 }
 
 // CmdTokensListInstances lists all permitted instances of a service
