@@ -3,13 +3,14 @@ package server
 import (
 	"bytes"
 	"fmt"
-	"github.com/fatih/color"
-	"github.com/vaitekunas/lentele"
-	"github.com/vaitekunas/unixsock"
 	"reflect"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/fatih/color"
+	"github.com/vaitekunas/lentele"
+	"github.com/vaitekunas/unixsock"
 )
 
 // ManagementConsole handles commands received over the unix socket
@@ -137,7 +138,106 @@ var respMissingArgs = &unixsock.Response{
 
 // CmdStatistics displays various log-related statistics
 func (m *managementConsole) CmdStatistics(args unixsock.Args) *unixsock.Response {
-	return &unixsock.Response{}
+	m.logserver.Lock()
+	defer m.logserver.Unlock()
+
+	type aggregate struct {
+		service   string
+		instances int
+		volume    int64
+		logs      int64
+		share     float64
+	}
+
+	hourlyLogs := [24]int64{}
+	hourlyVolume := [24]int64{}
+	hourlyVolumeShare := make([]float64, 24)
+	hours := make([]interface{}, 24)
+
+	// Aggregate data
+	var totalLogVolume int64
+	serviceAggroMap := map[string]*aggregate{}
+	serviceNames := []string{}
+	for _, stats := range m.logserver.stats {
+
+		service := stats.Service
+		_, _, plogs, pbytes := parsedSums(stats.LogsParsed, stats.LogsParsedBytes)
+
+		serviceAggro, ok := serviceAggroMap[service]
+		if !ok {
+			serviceNames = append(serviceNames, service)
+			serviceAggro = &aggregate{service: service}
+			serviceAggroMap[service] = serviceAggro
+		}
+
+		// Hourly statistics
+		for i := 0; i < 24; i++ {
+			hourlyLogs[i] += stats.LogsParsed[i]
+			hourlyVolume[i] += stats.LogsParsedBytes[i]
+		}
+
+		serviceAggro.instances++
+		serviceAggro.logs += plogs
+		serviceAggro.volume += pbytes
+
+		totalLogVolume += pbytes
+	}
+
+	// Calculate shares
+	shares := make([]float64, len(serviceNames))
+	i := 0
+	for _, stsum := range serviceAggroMap {
+		stsum.share = float64(stsum.volume) / float64(totalLogVolume)
+		shares[i] = stsum.share
+		i++
+	}
+
+	// Service table
+	serviceTable := lentele.New("Service", "Instances", "Logs sent", "Volume share")
+	shareSort := &floatSorter{floats: shares}
+	sort.Sort(shareSort)
+	idx := shareSort.GetIndexes()
+	for i := range idx {
+		service := serviceNames[i]
+		mp := serviceAggroMap[service]
+		plogStr, pbyteStr := prettyParsedSums(mp.logs, mp.volume)
+		serviceTable.AddRow("").Insert(service, mp.instances, fmt.Sprintf("%s (%s)", plogStr, pbyteStr), fmt.Sprintf("%6.2f%%", mp.share*100))
+	}
+
+	// Hourly table
+	hourlyTable := lentele.New("Hour", "Logs sent", "Volume", "Volume share")
+	for i := 0; i < 24; i++ {
+
+		var hour string
+		if i < 10 {
+			hour = fmt.Sprintf("0%d", i)
+		} else {
+			hour = fmt.Sprintf("%d", i)
+		}
+		hours[i] = hour
+
+		plogsStr, pbytesStr := prettyParsedSums(hourlyLogs[i], hourlyVolume[i])
+		share := float64(hourlyVolume[i]) / float64(totalLogVolume)
+
+		row := hourlyTable.AddRow("")
+		hourlyVolumeShare[i] = share
+		row.Insert(hour, plogsStr, pbytesStr, fmt.Sprintf("%6.2f%%", share*100))
+	}
+
+	// Print tables and barchart
+	buf := bytes.NewBuffer([]byte{})
+	serviceTable.Render(buf, false, true, true, lentele.LoadTemplate("classic"))
+	buf.WriteString("\n")
+	barchart(buf, hours, hourlyVolumeShare, "▧", color.New(color.FgHiGreen), 10, 1, true)
+	buf.WriteString("\n")
+	hourlyTable.Render(buf, false, true, true, lentele.LoadTemplate("classic"))
+
+	// Successful op
+	return &unixsock.Response{
+		Status:  "success",
+		Payload: console(fmt.Sprintf("journald statistics:\n%s", buf.String())),
+	}
+
 }
 
 // CmdTokensAdd adds a new token for a service/instance

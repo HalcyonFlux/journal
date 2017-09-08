@@ -37,6 +37,10 @@ func (l *LogServer) AddToken(service, instance string) (string, error) {
 
 	// Assign token to the key
 	l.tokens[key] = token
+	l.stats[key] = &Statistic{
+		Service:  service,
+		Instance: instance,
+	}
 
 	return token, nil
 }
