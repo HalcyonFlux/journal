@@ -128,7 +128,7 @@ func main() {
 	signal.Notify(sig, os.Interrupt)
 
 	fmt.Println(banner)
-	fmt.Println("journald is running...")
+	fmt.Printf("journald is running...\n\n")
 	select {
 	case <-sig: // Standard os interrupt (ctrl+c)
 		fmt.Println("\nReceived interrupt signal. Quitting.")

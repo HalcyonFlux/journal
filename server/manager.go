@@ -66,29 +66,40 @@ type managementConsole struct {
 // Execute is the executor of management console commands
 func (m *managementConsole) Execute(cmd string, args unixsock.Args) *unixsock.Response {
 
-	fmt.Printf(" ▶ [%s] Received command [%s]\n", time.Now().Format("2006-01-02 15:04:05"), bold(strings.ToLower(cmd)))
+	fmt.Println(console(bold(strings.ToLower(cmd))))
 
 	switch strings.ToLower(cmd) {
+
 	case "statistics":
 		return m.CmdStatistics(args)
+
 	case "tokens.add":
 		return m.CmdTokensAdd(args)
+
 	case "tokens.remove.instance":
 		return m.CmdTokensRemoveInstance(args)
+
 	case "tokens.remove.service":
 		return m.CmdTokensRemoveService(args)
+
 	case "tokens.list.instances":
 		return m.CmdTokensListInstances(args)
+
 	case "tokens.list.services":
 		return m.CmdTokensListServices(args)
+
 	case "logs.list":
 		return m.CmdLogsList(args)
+
 	case "remote.add":
 		return m.CmdRemoteAdd(args)
+
 	case "remote.remove":
 		return m.CmdRemoteRemove(args)
+
 	case "remote.list":
 		return m.CmdRemoteList(args)
+
 	default:
 		return &unixsock.Response{
 			Status: "failure",
@@ -138,6 +149,8 @@ func (m *managementConsole) CmdTokensAdd(args unixsock.Args) *unixsock.Response 
 		arg{"instance", reflect.String},
 	}
 
+	// TODO: match service instance names to a [a-z][0-9]-_. regex
+
 	// Validate arguments
 	if !validArguments(args, required) {
 		return respMissingArgs
@@ -156,7 +169,6 @@ func (m *managementConsole) CmdTokensAdd(args unixsock.Args) *unixsock.Response 
 
 	// Prepare table
 	table := lentele.New("Service", "Instance", "Token")
-	table.AddTitle(fmt.Sprintf("Token created for %s/%s", service, instance))
 	table.AddRow("").Insert(service, instance, token).Modify(bold, "Token")
 	buf := bytes.NewBuffer([]byte{})
 	table.Render(buf, false, true, false, lentele.LoadTemplate("classic"))
@@ -164,14 +176,41 @@ func (m *managementConsole) CmdTokensAdd(args unixsock.Args) *unixsock.Response 
 	// Successful op
 	return &unixsock.Response{
 		Status:  "success",
-		Payload: buf.String(),
+		Payload: console(fmt.Sprintf("added token for '%s':\n%s", bold(getCleanKey(service, instance)), buf.String())),
 	}
 
 }
 
 // CmdTokensRemoveInstance removes the token of a service/instance
 func (m *managementConsole) CmdTokensRemoveInstance(args unixsock.Args) *unixsock.Response {
-	return &unixsock.Response{}
+
+	// Validate arguments
+	required := []arg{
+		arg{"service", reflect.String},
+		arg{"instance", reflect.String},
+	}
+
+	// Validate arguments
+	if !validArguments(args, required) {
+		return respMissingArgs
+	}
+
+	// Identify service/instance
+	service := args["service"].(string)
+	instance := args["instance"].(string)
+	if err := m.logserver.RemoveToken(service, instance); err != nil {
+		return &unixsock.Response{
+			Status: "failure",
+			Error:  fmt.Errorf("Could not remove token: %s", err.Error()).Error(),
+		}
+	}
+
+	// Successful op
+	return &unixsock.Response{
+		Status:  "success",
+		Payload: console(fmt.Sprintf("removed token for '%s'\n", bold(getCleanKey(service, instance)))),
+	}
+
 }
 
 // CmdTokensRemoveService removes the token of all instances of a service
@@ -196,7 +235,6 @@ func (m *managementConsole) CmdTokensListInstances(args unixsock.Args) *unixsock
 
 	// Prepare table
 	table := lentele.New("Instance", "Token", "Last known IP", "Logs sent")
-	table.AddTitle(fmt.Sprintf("Service %s: permited instances", service))
 
 	m.logserver.Lock()
 	for key, token := range m.logserver.tokens {
@@ -220,7 +258,7 @@ func (m *managementConsole) CmdTokensListInstances(args unixsock.Args) *unixsock
 
 	return &unixsock.Response{
 		Status:  "success",
-		Payload: buf.String(),
+		Payload: console(fmt.Sprintf("available instances for service %s:\n%s", bold(service), buf.String())),
 	}
 }
 
@@ -250,7 +288,6 @@ func (m *managementConsole) CmdTokensListServices(args unixsock.Args) *unixsock.
 
 	// Prepare table
 	table := lentele.New("", "Service", "Instances", "Last log entry", "Log entries parsed")
-	table.AddTitle("Permitted services")
 	for _, name := range serviceNames {
 		service := services[name]
 		now := time.Now().Format("2006-01-02 15:04")

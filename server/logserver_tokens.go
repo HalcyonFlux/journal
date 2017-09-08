@@ -1,12 +1,12 @@
 package server
 
-
 import (
+	"bufio"
 	rand "crypto/rand"
 	"crypto/sha256"
 	"fmt"
+	"io/ioutil"
 	"os"
-	"bufio"
 	"strings"
 )
 
@@ -21,7 +21,7 @@ func (l *LogServer) AddToken(service, instance string) (string, error) {
 	// Verify key existence
 	if _, ok := l.tokens[key]; ok {
 		return "", fmt.Errorf("AddToken: token for %s already exists", key)
-	}	
+	}
 
 	// Create a random token
 	tokenBytes := make([]byte, 32)
@@ -55,8 +55,8 @@ func (l *LogServer) RemoveToken(service, instance string) error {
 	}
 
 	// Remove the token from file
-	if err := l.removeTokenFromFile(key); err != nil {
-		return fmt.Errorf("RemoveToken: could not remove token for %s: %s",key, err.Error())
+	if err := l.removeTokenFromFile(key, false); err != nil {
+		return fmt.Errorf("RemoveToken: could not remove token for %s: %s", key, err.Error())
 	}
 
 	// Remove from memory
@@ -79,7 +79,7 @@ func (l *LogServer) writeTokenToFile(key, token string) error {
 		if _, err := f.WriteString(fmt.Sprintf("%s\t%s\n", key, token)); err != nil {
 			return fmt.Errorf("writeTokenToFile: could not write token to file: %s", err.Error())
 		}
-	}else {
+	} else {
 		return fmt.Errorf("writeTokenToFile: could not open file: %s", err.Error())
 	}
 
@@ -87,11 +87,12 @@ func (l *LogServer) writeTokenToFile(key, token string) error {
 
 }
 
-
 // removeTokenFromFile removes a single token from the tokens.db
-func (l *LogServer) removeTokenFromFile(key string) error {
-	l.Lock()
-	defer l.Unlock()
+func (l *LogServer) removeTokenFromFile(key string, lock bool) error {
+	if lock {
+		l.Lock()
+		defer l.Unlock()
+	}
 
 	// Make sure file exists
 	if err := fileExists(l.tokenPath); err != nil {
@@ -99,7 +100,7 @@ func (l *LogServer) removeTokenFromFile(key string) error {
 	}
 
 	// Open file for reading
-	f, err := os.OpenFile(l.tokenPath, os.O_RDONLY|os.O_WRONLY, 600)
+	f, err := os.OpenFile(l.tokenPath, os.O_RDWR, 600)
 	if err != nil {
 		return fmt.Errorf("removeTokenFromFile: could not open token database for reading: %s", err.Error())
 	}
@@ -108,28 +109,33 @@ func (l *LogServer) removeTokenFromFile(key string) error {
 	fileScanner := bufio.NewScanner(f)
 	tokens := []string{}
 	for fileScanner.Scan() {
-			line := fileScanner.Text()
-			parts := strings.Split(line,"\t")
-			if len(parts) != 2 {
-				continue
-			}
-			keyParts := strings.Split(parts[0],"/")
-			if len(keyParts) != 2 {
-				continue
-			}
-			if parts[0] != key {
-				tokens = append(tokens,line)
-			}
+		line := fileScanner.Text()
+
+		parts := strings.Split(line, "\t")
+		if len(parts) != 2 {
+			continue
+		}
+		keyParts := strings.Split(parts[0], "/")
+		if len(keyParts) != 2 {
+			continue
+		}
+		fmt.Printf("'%s' '%s' '%t'\n", parts[0], key, parts[0] != key)
+		if parts[0] != key {
+			tokens = append(tokens, line)
+		}
+	}
+
+	if err := f.Close(); err != nil {
+		return err
 	}
 
 	// Revwrite tokens.db
-	if _, err := f.WriteString(strings.Join(tokens,"\n")); err != nil {
+	if err := ioutil.WriteFile(l.tokenPath, []byte(strings.Join(tokens, "\n")), 0600); err != nil {
 		return fmt.Errorf("removeTokenFromFile: could not rewrite token database: %s", err.Error())
 	}
 
 	return f.Close()
 }
-
 
 // loadTokensFromDisk loads all the tokens from disk to memory
 func (l *LogServer) loadTokensFromDisk() error {
@@ -150,16 +156,16 @@ func (l *LogServer) loadTokensFromDisk() error {
 	// Read line by line and add to the in-memory db
 	fileScanner := bufio.NewScanner(f)
 	for fileScanner.Scan() {
-			line := fileScanner.Text()
-			parts := strings.Split(line,"\t")
-			if len(parts) != 2 {
-				continue
-			}
-			keyParts := strings.Split(parts[0],"/")
-			if len(keyParts) != 2 {
-				continue
-			}
-			l.tokens[parts[0]] = parts[1]
+		line := fileScanner.Text()
+		parts := strings.Split(line, "\t")
+		if len(parts) != 2 {
+			continue
+		}
+		keyParts := strings.Split(parts[0], "/")
+		if len(keyParts) != 2 {
+			continue
+		}
+		l.tokens[parts[0]] = parts[1]
 	}
 
 	return f.Close()

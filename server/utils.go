@@ -2,13 +2,15 @@ package server
 
 import (
 	"fmt"
-	"github.com/fatih/color"
-	context "golang.org/x/net/context"
-	metadata "google.golang.org/grpc/metadata"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/fatih/color"
+	context "golang.org/x/net/context"
+	metadata "google.golang.org/grpc/metadata"
 )
 
 // Extracts service, instance and token from the grpc context
@@ -74,6 +76,11 @@ func getCleanKey(service, instance string) string {
 // bold returns a bolded version of v
 func bold(v interface{}) interface{} {
 	return color.New(color.Bold).Sprint(v)
+}
+
+// console writes a message with a timestamp to console
+func console(s interface{}) string {
+	return fmt.Sprintf(" %s [%s] %v", color.New(color.FgHiBlue).Sprint("▶"), time.Now().Format("2006-01-02 15:04:05"), s)
 }
 
 // parsedSums sums and formats parsed log statistics
