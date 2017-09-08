@@ -4,15 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/vaitekunas/journal/logrpc"
+	"io/ioutil"
 	"os"
 	"time"
-  "io/ioutil"
 
 	context "golang.org/x/net/context"
 )
 
 // GatherStatistics saves log-related statistics
-func (l *LogServer) GatherStatistics(service, instance, key string, logEntry *logrpc.LogEntry) {
+func (l *LogServer) GatherStatistics(service, instance, key, ip string, logEntry *logrpc.LogEntry) {
 	l.Lock()
 	defer l.Unlock()
 
@@ -35,7 +35,7 @@ func (l *LogServer) GatherStatistics(service, instance, key string, logEntry *lo
 	stats := l.stats[key]
 	stats.LogsParsed[now.Hour()]++
 	stats.LogsParsedBytes[now.Hour()] += int64(len(jsoned))
-	stats.LastIP = ""
+	stats.LastIP = ip
 	stats.LastActive = now
 }
 
@@ -93,26 +93,26 @@ func (l *LogServer) loadStatisticsFromDisk() error {
 		return fmt.Errorf("loadStatisticsFromDisk: could not create statistics database: %s", err.Error())
 	}
 
-  // Open file for reading
-  f, err := os.OpenFile(l.statsPath, os.O_RDONLY, 600)
-  if err != nil {
-    return fmt.Errorf("loadStatisticsFromDisk: could not open statistics file for reading: %s", err.Error())
-  }
-  defer f.Close()
+	// Open file for reading
+	f, err := os.OpenFile(l.statsPath, os.O_RDONLY, 600)
+	if err != nil {
+		return fmt.Errorf("loadStatisticsFromDisk: could not open statistics file for reading: %s", err.Error())
+	}
+	defer f.Close()
 
-  // Read json-encoded statistics
-  jsoned, err := ioutil.ReadFile(l.statsPath)
-  if err != nil {
-    return fmt.Errorf("loadStatisticsFromDisk: could not read file: %s", err.Error())
-  }
-  if len(jsoned) == 0 {
-    return nil
-  }
+	// Read json-encoded statistics
+	jsoned, err := ioutil.ReadFile(l.statsPath)
+	if err != nil {
+		return fmt.Errorf("loadStatisticsFromDisk: could not read file: %s", err.Error())
+	}
+	if len(jsoned) == 0 {
+		return nil
+	}
 
-  // Unmarshal json-encoded statistics
-  if err := json.Unmarshal(jsoned, &l.stats); err != nil {
-    return fmt.Errorf("loadStatisticsFromDisk: could not unmarshal statistics: %s", err.Error())
-  }
+	// Unmarshal json-encoded statistics
+	if err := json.Unmarshal(jsoned, &l.stats); err != nil {
+		return fmt.Errorf("loadStatisticsFromDisk: could not unmarshal statistics: %s", err.Error())
+	}
 
 	return nil
 }

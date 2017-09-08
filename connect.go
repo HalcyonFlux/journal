@@ -51,10 +51,11 @@ func (r *remoteClient) Close() error {
 func ConnectToJournald(host string, port int, service, instance, token string, timeout time.Duration) (io.WriteCloser, error) {
 
 	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", host, port), grpc.WithPerRPCCredentials(&logrpc.TokenCred{
+		IP:       getIP(),
 		Service:  service,
 		Instance: instance,
 		Token:    token,
-	}), grpc.WithInsecure())
+	}), grpc.WithInsecure()) // TODO: replace or make it an option
 
 	if err != nil {
 		return nil, fmt.Errorf("ConnectToLogServer: could not establish a gRPC connection :%s", err.Error())

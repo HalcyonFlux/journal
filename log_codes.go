@@ -147,5 +147,5 @@ var defaultCodes = map[int]Code{
 }
 
 // defaultCols contains default log columns
-var defaultCols = []int64{COL_DATE_YYMMDD_HHMMSS_NANO, COL_SERVICE, COL_INSTANCE, COL_MSG_TYPE_SHORT,
+var defaultCols = []int64{COL_DATE_YYMMDD_HHMMSS_NANO, COL_SERVICE, COL_INSTANCE, COL_CALLER, COL_MSG_TYPE_SHORT,
 	COL_MSG_TYPE_INT, COL_MSG_TYPE_STR, COL_MSG, COL_FILE, COL_LINE}

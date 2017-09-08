@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net"
 	"os"
 	"path"
 	"runtime"
@@ -21,7 +22,7 @@ func (l *Logger) getMsgCode(code int) (string, bool) {
 
 	resp, ok := l.codes[code]
 	if !ok {
-		return "UNKOWN", true
+		return "UNKNOWN", true
 	}
 	return resp.Type, resp.Error
 }
@@ -389,4 +390,20 @@ func canWrite(folder string) bool {
 	os.Remove(name)
 
 	return true
+}
+
+// Returns the IP
+// https://stackoverflow.com/questions/23558425/how-do-i-get-the-local-ip-address-in-go
+func getIP() string {
+
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return "N/A"
+	}
+	defer conn.Close()
+
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+
+	return localAddr.IP.String()
+
 }

@@ -195,18 +195,25 @@ func (m *managementConsole) CmdTokensListInstances(args unixsock.Args) *unixsock
 	service := strings.ToLower(args["service"].(string))
 
 	// Prepare table
-	table := lentele.New("Instance", "Token", "Last IP", "Logs parsed")
+	table := lentele.New("Instance", "Token", "Last known IP", "Logs sent")
 	table.AddTitle(fmt.Sprintf("Service %s: permited instances", service))
 
+	m.logserver.Lock()
 	for key, token := range m.logserver.tokens {
 		parts := strings.Split(key, "/")
 		if len(parts) != 2 {
 			continue
 		}
 		if parts[0] == service {
-			table.AddRow("").Insert(parts[1], fmt.Sprintf("%s...", token[0:10]), "???", "???")
+			ip := m.logserver.stats[key].LastIP
+			plogs := m.logserver.stats[key].LogsParsed
+			pbytes := m.logserver.stats[key].LogsParsedBytes
+			plogsStr, pbytesStr, _, _ := parsedSums(plogs, pbytes)
+
+			table.AddRow("").Insert(parts[1], fmt.Sprintf("%s...", token[0:10]), ip, fmt.Sprintf("%s (%s)", plogsStr, pbytesStr))
 		}
 	}
+	m.logserver.Unlock()
 
 	buf := bytes.NewBuffer([]byte{})
 	table.Render(buf, false, true, false, lentele.LoadTemplate("classic"))

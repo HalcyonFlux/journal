@@ -14,9 +14,6 @@ import (
 	grpc "google.golang.org/grpc"
 )
 
-// killswitch is used to close all goroutines
-type killswitch chan<- bool
-
 // Config contains all the configuration for the remote logger
 type Config struct {
 
@@ -96,7 +93,7 @@ func New(config *Config) (*LogServer, error) {
 		}
 	}()
 
-	// Quit if gRPC server fails (wait for 60 seconds to be sure)
+	// Quit if gRPC server fails (wait for 10 seconds to be sure)
 	go func() {
 		select {
 		case errTCP := <-failChan:
@@ -105,7 +102,7 @@ func New(config *Config) (*LogServer, error) {
 				rLogger.Quit()
 				os.Exit(1)
 			}
-		case <-time.After(60 * time.Second):
+		case <-time.After(10 * time.Second):
 		}
 	}()
 
@@ -161,13 +158,13 @@ type LogServer struct {
 func (l *LogServer) RemoteLog(ctx context.Context, logEntry *logrpc.LogEntry) (*logrpc.Nothing, error) {
 
 	// Extract credentials
-	service, instance, key, _, err := extractCaller(ctx)
+	service, instance, key, _, ip, err := extractCaller(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("RemoteLog: could not extract caller credentials")
 	}
 
 	// Update statistics
-	go l.GatherStatistics(service, instance, key, logEntry)
+	go l.GatherStatistics(service, instance, key, ip, logEntry)
 
 	// Push entry into the log entry channel
 	if err := l.logger.RawEntry(logEntry.GetEntry()); err != nil {
@@ -179,9 +176,11 @@ func (l *LogServer) RemoteLog(ctx context.Context, logEntry *logrpc.LogEntry) (*
 
 // Authorize is a gRPC interceptor that authorizes incoming RPCs
 func (l *LogServer) Authorize(ctx context.Context) error {
+	l.Lock()
+	defer l.Unlock()
 
 	// Verify presence of metadata
-	_, _, key, token, err := extractCaller(ctx)
+	_, _, key, token, _, err := extractCaller(ctx)
 	if err != nil {
 		return fmt.Errorf("Authorize: cannot extract caller credentials :%s", err.Error())
 	}

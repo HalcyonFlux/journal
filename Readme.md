@@ -1,4 +1,4 @@
-# journal [![godoc](https://img.shields.io/badge/go-documentation-blue.svg)](https://godoc.org/github.com/vaitekunas/journal) [![Build Status](https://travis-ci.org/vaitekunas/journal.svg?branch=master)](https://travis-ci.org/vaitekunas/journal) [![Coverage Status](https://coveralls.io/repos/github/vaitekunas/journal/badge.svg?branch=master)](https://coveralls.io/github/vaitekunas/journal?branch=master)
+# journal [![godoc](https://img.shields.io/badge/go-documentation-blue.svg)](https://godoc.org/github.com/vaitekunas/journal) [![Go Report Card](https://goreportcard.com/badge/github.com/vaitekunas/journal)](https://goreportcard.com/report/github.com/vaitekunas/journal) [![Build Status](https://travis-ci.org/vaitekunas/journal.svg?branch=master)](https://travis-ci.org/vaitekunas/journal) [![Coverage Status](https://coveralls.io/repos/github/vaitekunas/journal/badge.svg?branch=master)](https://coveralls.io/github/vaitekunas/journal?branch=master)
 
 Package `journal` is intended to be a very simple, but somewhat flexible logging
 facility for golang services.

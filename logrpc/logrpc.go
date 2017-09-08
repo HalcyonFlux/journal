@@ -5,6 +5,7 @@ import "golang.org/x/net/context"
 // TokenCred implements grpc.PerRPCCredentials and can be used for authentication
 // via gRPC
 type TokenCred struct {
+	IP       string
 	Service  string
 	Instance string
 	Token    string
@@ -16,6 +17,7 @@ func (c *TokenCred) GetRequestMetadata(context.Context, ...string) (map[string]s
 		"service":  c.Service,
 		"instance": c.Instance,
 		"token":    c.Token,
+		"ip":       c.IP,
 	}, nil
 }
 
