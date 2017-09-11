@@ -78,10 +78,10 @@ func (m *managementConsole) Execute(cmd string, args unixsock.Args) *unixsock.Re
 	case "tokens.add":
 		return m.CmdTokensAdd(args)
 
-	case "tokens.remove.instance":
+	case "tokens.revoke.instance":
 		return m.CmdTokensRemoveInstance(args)
 
-	case "tokens.remove.service":
+	case "tokens.revoke.service":
 		return m.CmdTokensRemoveService(args)
 
 	case "tokens.list.instances":
@@ -134,7 +134,7 @@ func validArguments(args unixsock.Args, required []arg) bool {
 
 var respMissingArgs = &unixsock.Response{
 	Status: "failure",
-	Error:  fmt.Errorf("Missing/invalid parameters").Error(),
+	Error:  fmt.Sprint("Missing/invalid parameters"),
 }
 
 // CmdStatistics displays various log-related statistics
