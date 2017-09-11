@@ -414,6 +414,8 @@ func (m *managementConsole) CmdRemoteAdd(args unixsock.Args) *unixsock.Response 
 	// Extract backend name
 	required := []arg{
 		arg{"backend", reflect.String},
+		arg{"host", reflect.String},
+		arg{"port", reflect.Float64},
 	}
 
 	if !validArguments(args, required) {
@@ -422,13 +424,15 @@ func (m *managementConsole) CmdRemoteAdd(args unixsock.Args) *unixsock.Response 
 
 	// Connect to backend
 	backend := args["backend"].(string)
+	host := args["host"].(string)
+	port := int(args["port"].(float64))
+	backendKey := getCleanBackendKey("journald", host, port)
+
 	switch strings.ToLower(backend) {
 
 	case "journald":
 
 		required := []arg{
-			arg{"host", reflect.String},
-			arg{"port", reflect.Float64},
 			arg{"service", reflect.String},
 			arg{"instance", reflect.String},
 			arg{"token", reflect.String},
@@ -438,13 +442,9 @@ func (m *managementConsole) CmdRemoteAdd(args unixsock.Args) *unixsock.Response 
 			return respMissingArgs
 		}
 
-		host := args["host"].(string)
-		port := int(args["port"].(float64))
 		service := args["service"].(string)
 		instance := args["instance"].(string)
 		token := args["token"].(string)
-
-		backendKey := getCleanBackendKey("journald", host, port)
 
 		m.logserver.Lock()
 		defer m.logserver.Unlock()
@@ -486,7 +486,36 @@ func (m *managementConsole) CmdRemoteAdd(args unixsock.Args) *unixsock.Response 
 
 // CmdRemoteRemove removes a remote backend
 func (m *managementConsole) CmdRemoteRemove(args unixsock.Args) *unixsock.Response {
-	return &unixsock.Response{}
+
+	// Extract backend details
+	required := []arg{
+		arg{"backend", reflect.String},
+		arg{"host", reflect.String},
+		arg{"port", reflect.Float64},
+	}
+
+	if !validArguments(args, required) {
+		return respMissingArgs
+	}
+
+	// Remove backend from destination map
+	backend := args["backend"].(string)
+	host := args["host"].(string)
+	port := int(args["port"].(float64))
+	backendKey := getCleanBackendKey(backend, host, port)
+
+	if err := m.logserver.logger.RemoveDestination(backendKey); err != nil {
+		return &unixsock.Response{
+			Status: unixsock.STATUS_FAIL,
+			Error:  err.Error(),
+		}
+	}
+
+	return &unixsock.Response{
+		Status:  unixsock.STATUS_OK,
+		Payload: console(fmt.Sprintf("remote backend %s was removed", bold("journald"))),
+	}
+
 }
 
 // CmdRemoteList lists all active remote backends

@@ -42,7 +42,8 @@ func (l logEntry) toJSON(cols []int64) string {
 
 	jsoned, err := json.Marshal(nameLog)
 	if err != nil {
-
+		return "{}"
 	}
+
 	return string(jsoned)
 }

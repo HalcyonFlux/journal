@@ -266,6 +266,27 @@ func (l *Logger) pushToLedger(depth int, caller string, code int, msg string, fo
 	name, isErr := l.getMsgCode(code)
 
 	// Prepare log entry
+	entry := l.newRawEntry(caller, name, fmsg, file, code, line, isErr)
+
+	// Write entry into the ledger
+	if inTransit {
+		go func() {
+			l.ledger <- entry
+		}()
+	}
+
+	// Return error
+	if isErr {
+		return fmt.Errorf("%s", fmsg)
+	}
+
+	return nil
+}
+
+// newRawEntry builds a new raw log entry
+func (l *Logger) newRawEntry(caller, name, fmsg, file string, line, code int, isErr bool) logEntry {
+
+	// Prepare log entry
 	entry := logEntry{}
 	for i := int64(COL_DATE_YYMMDD); i <= int64(COL_LINE); i++ {
 		switch i {
@@ -302,19 +323,8 @@ func (l *Logger) pushToLedger(depth int, caller string, code int, msg string, fo
 		}
 	}
 
-	// Write entry into the ledger
-	if inTransit {
-		go func() {
-			l.ledger <- entry
-		}()
-	}
+	return entry
 
-	// Return error
-	if isErr {
-		return fmt.Errorf("%s", fmsg)
-	}
-
-	return nil
 }
 
 // write processes the log ledger and writes entries to all the relevant sources
@@ -335,21 +345,10 @@ func (l *Logger) write() killswitch {
 
 				l.mu.Lock()
 
-				// Write to stdout
-				if l.stdout != nil {
-					l.stdout.WriteString(fmt.Sprintf("%s\n", entry.toStr(l.config.Columns)))
-				}
+				// Write to local endpoints
+				l.writeLocal(entry)
 
-				// Write to local file
-				if l.logfile != nil {
-					if l.config.JSON {
-						l.logfile.WriteString(fmt.Sprintf("%s\n", entry.toJSON(l.config.Columns)))
-					} else {
-						l.logfile.WriteString(fmt.Sprintf("%s\n", entry.toStr(l.config.Columns)))
-					}
-				}
-
-				// Write to remote backends
+				// Write to remote endpoints
 				if len(l.remoteWriters) > 0 {
 					jsoned, err := json.Marshal(entry)
 					if err != nil {
@@ -358,7 +357,11 @@ func (l *Logger) write() killswitch {
 
 					for _, remote := range l.remoteWriters {
 						if _, err := remote.Write(jsoned); err != nil {
-							l.Log("system", 1, "write: could not send log to a remote backend: %s", err.Error())
+							fmsg := fmt.Sprintf("write: could not send log to a remote backend: %s", err.Error())
+							_, file, line, _ := runtime.Caller(2)
+							name, isErr := l.getMsgCode(1)
+							rawEntry := l.newRawEntry("system", name, fmsg, file, line, 1, isErr)
+							l.writeLocal(rawEntry)
 						}
 					}
 				}
@@ -375,6 +378,25 @@ func (l *Logger) write() killswitch {
 
 	<-ready
 	return quitChan
+}
+
+// writeLocal writes a log to local endpoints
+func (l *Logger) writeLocal(entry logEntry) {
+
+	// Write to stdout
+	if l.stdout != nil {
+		l.stdout.WriteString(fmt.Sprintf("%s\n", entry.toStr(l.config.Columns)))
+	}
+
+	// Write to local file
+	if l.logfile != nil {
+		if l.config.JSON {
+			l.logfile.WriteString(fmt.Sprintf("%s\n", entry.toJSON(l.config.Columns)))
+		} else {
+			l.logfile.WriteString(fmt.Sprintf("%s\n", entry.toStr(l.config.Columns)))
+		}
+	}
+
 }
 
 // canWrite checks if the directory is writeable

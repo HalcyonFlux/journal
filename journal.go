@@ -57,13 +57,14 @@ func New(config *Config) (*Logger, error) {
 
 	// Initiate log instance
 	Log := &Logger{
-		mu:           &sync.Mutex{},
-		wg:           &sync.WaitGroup{},
-		active:       true,
-		config:       config,
-		codes:        defaultCodes,
-		ledger:       make(chan logEntry, 1000),
-		killswitches: []killswitch{},
+		mu:            &sync.Mutex{},
+		wg:            &sync.WaitGroup{},
+		active:        true,
+		config:        config,
+		codes:         defaultCodes,
+		ledger:        make(chan logEntry, 1000),
+		remoteWriters: map[string]io.Writer{},
+		killswitches:  []killswitch{},
 	}
 
 	// Start file rotation (async)
@@ -88,9 +89,9 @@ type Logger struct {
 	killswitches []killswitch  // Killswitches of all coroutines spawned by the logger
 
 	// log Writers
-	logfile       *os.File    // local logfile's file descriptor
-	stdout        *os.File    // local stdout
-	remoteWriters []io.Writer // remote log writers (grpc, kafka, etc)
+	logfile       *os.File             // local logfile's file descriptor
+	stdout        *os.File             // local stdout
+	remoteWriters map[string]io.Writer // remote log writers (grpc, kafka, etc)
 
 	// gRPC-related
 	gRPC        *logrpc.RemoteLoggerClient // gRPC client
@@ -162,8 +163,31 @@ func (l *Logger) RawEntry(entry map[int64]string) error {
 }
 
 // AddDestination adds a (remote) destination to send logs to
-func (l *Logger) AddDestination(writer io.Writer) {
-	l.remoteWriters = append(l.remoteWriters, writer)
+func (l *Logger) AddDestination(name string, writer io.Writer) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if _, ok := l.remoteWriters[name]; ok {
+		return fmt.Errorf("AddDestination: destination %s already present", name)
+	}
+
+	l.remoteWriters[name] = writer
+
+	return nil
+}
+
+// RemoveDestination removes a (remote) destination to send logs to
+func (l *Logger) RemoveDestination(name string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if _, ok := l.remoteWriters[name]; !ok {
+		return fmt.Errorf("RemoveDestination: unknown destination '%s'", name)
+	}
+
+	delete(l.remoteWriters, name)
+
+	return nil
 }
 
 // Quit stops all Logger coroutines and closes files
