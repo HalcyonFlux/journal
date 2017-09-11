@@ -183,7 +183,7 @@ func (m *managementConsole) CmdStatistics(args unixsock.Args) *unixsock.Response
 
 	// Successful op
 	return &unixsock.Response{
-		Status:  "success",
+		Status:  unixsock.STATUS_OK,
 		Payload: console(fmt.Sprintf("journald statistics:\n%s", buf.String())),
 	}
 
@@ -224,7 +224,7 @@ func (m *managementConsole) CmdTokensAdd(args unixsock.Args) *unixsock.Response 
 
 	// Successful op
 	return &unixsock.Response{
-		Status:  "success",
+		Status:  unixsock.STATUS_OK,
 		Payload: console(fmt.Sprintf("added token for '%s':\n%s", bold(getCleanKey(service, instance)), buf.String())),
 	}
 
@@ -256,7 +256,7 @@ func (m *managementConsole) CmdTokensRemoveInstance(args unixsock.Args) *unixsoc
 
 	// Successful op
 	return &unixsock.Response{
-		Status:  "success",
+		Status:  unixsock.STATUS_OK,
 		Payload: console(fmt.Sprintf("removed token for '%s'\n", bold(getCleanKey(service, instance)))),
 	}
 
@@ -286,7 +286,7 @@ func (m *managementConsole) CmdTokensRemoveService(args unixsock.Args) *unixsock
 
 	// Successful op
 	return &unixsock.Response{
-		Status:  "success",
+		Status:  unixsock.STATUS_OK,
 		Payload: console(fmt.Sprintf("removed all tokens for service '%s'\n", bold(service))),
 	}
 
@@ -333,7 +333,7 @@ func (m *managementConsole) CmdTokensListInstances(args unixsock.Args) *unixsock
 	table.Render(buf, false, true, false, lentele.LoadTemplate("classic"))
 
 	return &unixsock.Response{
-		Status:  "success",
+		Status:  unixsock.STATUS_OK,
 		Payload: console(fmt.Sprintf("available instances for service %s:\n%s", bold(service), buf.String())),
 	}
 }
@@ -355,7 +355,7 @@ func (m *managementConsole) CmdTokensListServices(args unixsock.Args) *unixsock.
 	table.Render(buf, false, true, false, lentele.LoadTemplate("classic"))
 
 	return &unixsock.Response{
-		Status:  "success",
+		Status:  unixsock.STATUS_OK,
 		Payload: console(fmt.Sprintf("available services:\n%s", buf.String())),
 	}
 }
@@ -403,7 +403,7 @@ func (m *managementConsole) CmdLogsList(args unixsock.Args) *unixsock.Response {
 	table.Render(buf, false, true, false, lentele.LoadTemplate("classic"))
 
 	return &unixsock.Response{
-		Status:  "success",
+		Status:  unixsock.STATUS_OK,
 		Payload: console(fmt.Sprintf("available logfiles:\n%s", buf.String())),
 	}
 }
@@ -466,7 +466,7 @@ func (m *managementConsole) CmdRemoteAdd(args unixsock.Args) *unixsock.Response 
 
 		return &unixsock.Response{
 			Status:  unixsock.STATUS_OK,
-			Payload: console(fmt.Sprintf("added remote backend %s", bold("journald"))),
+			Payload: console(fmt.Sprintf("added remote backend %s", bold(backendKey))),
 		}
 
 	case "kafka":
@@ -513,12 +513,34 @@ func (m *managementConsole) CmdRemoteRemove(args unixsock.Args) *unixsock.Respon
 
 	return &unixsock.Response{
 		Status:  unixsock.STATUS_OK,
-		Payload: console(fmt.Sprintf("remote backend %s was removed", bold("journald"))),
+		Payload: console(fmt.Sprintf("removed remote backend %s", bold(backendKey))),
 	}
 
 }
 
 // CmdRemoteList lists all active remote backends
 func (m *managementConsole) CmdRemoteList(args unixsock.Args) *unixsock.Response {
-	return &unixsock.Response{}
+
+	destinations := m.logserver.logger.ListDestinations()
+	table := lentele.New("Destination")
+	rowWidth := len("Destination")
+	for _, dst := range destinations {
+		if ldst := len(dst); ldst > rowWidth {
+			rowWidth = ldst
+		}
+	}
+
+	format := fmt.Sprintf("%%-%ds", rowWidth)
+	for _, dst := range destinations {
+		table.AddRow("").Insert(fmt.Sprintf(format, dst))
+	}
+
+	buf := bytes.NewBuffer([]byte{})
+	table.Render(buf, false, true, false, lentele.LoadTemplate("classic"))
+
+	return &unixsock.Response{
+		Status:  unixsock.STATUS_OK,
+		Payload: console(fmt.Sprintf("destinations currently used by journald:\n%s", buf.String())),
+	}
+
 }

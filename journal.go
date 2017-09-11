@@ -3,11 +3,13 @@ package journal
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/vaitekunas/journal/logrpc"
 	"io"
 	"os"
+	"sort"
 	"sync"
 	"time"
+
+	"github.com/vaitekunas/journal/logrpc"
 )
 
 // Config contains all the necessary settings to create a new local logging facility
@@ -188,6 +190,33 @@ func (l *Logger) RemoveDestination(name string) error {
 	delete(l.remoteWriters, name)
 
 	return nil
+}
+
+// ListDestinations lists all (remote) destinations
+func (l *Logger) ListDestinations() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	var localDst []string
+
+	switch l.config.Out {
+	case OUT_STDOUT:
+		localDst = []string{"stdout"}
+	case OUT_FILE:
+		localDst = []string{l.logfile.Name()}
+	case OUT_FILE_AND_STDOUT:
+		localDst = []string{"stdout", l.logfile.Name()}
+	}
+
+	remoteDst := make([]string, len(l.remoteWriters))
+	i := 0
+	for endpoint := range l.remoteWriters {
+		remoteDst[i] = endpoint
+		i++
+	}
+	sort.Strings(remoteDst)
+
+	return append(localDst, remoteDst...)
 }
 
 // Quit stops all Logger coroutines and closes files
