@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 
 	"github.com/fatih/color"
@@ -359,7 +360,50 @@ func (m *managementConsole) CmdTokensListServices(args unixsock.Args) *unixsock.
 
 // CmdLogsList list all available logfiles and their archives
 func (m *managementConsole) CmdLogsList(args unixsock.Args) *unixsock.Response {
-	return &unixsock.Response{}
+
+	tail := -1
+
+	if show, ok := args["show"]; ok {
+		if showInt, okInt := show.(float64); okInt && showInt > 0 {
+			tail = int(showInt)
+		}
+	}
+
+	logs, err := m.logserver.Logfiles()
+	if err != nil {
+		return &unixsock.Response{
+			Status: unixsock.STATUS_FAIL,
+			Error:  err.Error(),
+		}
+	}
+
+	names := make([]string, len(logs))
+	i := 0
+	for name := range logs {
+		names[i] = name
+		i++
+	}
+
+	sort.Strings(names)
+	if tail > 0 && len(names) >= tail {
+		names = names[len(names)-tail:]
+	}
+
+	table := lentele.New("Logfile", "Size")
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		table.AddRow("").Insert(name, logs[name])
+	}
+
+	buf := bytes.NewBuffer([]byte{})
+	table.Render(buf, false, true, false, lentele.LoadTemplate("classic"))
+
+	return &unixsock.Response{
+		Status:  "success",
+		Payload: console(fmt.Sprintf("available logfiles:\n%s", buf.String())),
+	}
 }
 
 // CmdRemoteAdd adds a remote backend

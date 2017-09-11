@@ -69,6 +69,7 @@ func New(config *Config) (*LogServer, error) {
 	rLogger.server = grpc.NewServer(grpc.UnaryInterceptor(intercept))
 	rLogger.stats = make(map[string]*Statistic)
 	rLogger.tokens = make(map[string]string)
+	rLogger.logfolder = config.LoggerConfig.Folder
 	rLogger.quitChan = make(chan bool, 1)
 
 	// Load auth tokens from disk
@@ -138,6 +139,8 @@ type LogServer struct {
 
 	logger *journal.Logger // Local logger
 	server *grpc.Server    // gRPC server
+
+	logfolder string // Folder where logs are stored locally
 
 	unixSockPath string              // Path to the unix socket file
 	unixsrv      unixsrv.UnixSockSrv // UNIX domain socket server
