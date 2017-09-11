@@ -66,10 +66,10 @@ func New(config *Config) (*LogServer, error) {
 	rLogger.listenTCP = listenTCP
 	rLogger.statsPath = config.StatsPath
 	rLogger.tokenPath = config.TokenPath
+	rLogger.logfolder = config.LoggerConfig.Folder
 	rLogger.server = grpc.NewServer(grpc.UnaryInterceptor(intercept))
 	rLogger.stats = make(map[string]*Statistic)
 	rLogger.tokens = make(map[string]string)
-	rLogger.logfolder = config.LoggerConfig.Folder
 	rLogger.quitChan = make(chan bool, 1)
 
 	// Load auth tokens from disk

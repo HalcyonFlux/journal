@@ -6,8 +6,10 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/fatih/color"
+	"github.com/vaitekunas/journal"
 	"github.com/vaitekunas/lentele"
 	"github.com/vaitekunas/unixsock"
 )
@@ -408,7 +410,78 @@ func (m *managementConsole) CmdLogsList(args unixsock.Args) *unixsock.Response {
 
 // CmdRemoteAdd adds a remote backend
 func (m *managementConsole) CmdRemoteAdd(args unixsock.Args) *unixsock.Response {
-	return &unixsock.Response{}
+
+	// Extract backend name
+	required := []arg{
+		arg{"backend", reflect.String},
+	}
+
+	if !validArguments(args, required) {
+		return respMissingArgs
+	}
+
+	// Connect to backend
+	backend := args["backend"].(string)
+	switch strings.ToLower(backend) {
+
+	case "journald":
+
+		required := []arg{
+			arg{"host", reflect.String},
+			arg{"port", reflect.Float64},
+			arg{"service", reflect.String},
+			arg{"instance", reflect.String},
+			arg{"token", reflect.String},
+		}
+
+		if !validArguments(args, required) {
+			return respMissingArgs
+		}
+
+		host := args["host"].(string)
+		port := int(args["port"].(float64))
+		service := args["service"].(string)
+		instance := args["instance"].(string)
+		token := args["token"].(string)
+
+		backendKey := getCleanBackendKey("journald", host, port)
+
+		m.logserver.Lock()
+		defer m.logserver.Unlock()
+
+		remote, err := journal.ConnectToJournald(host, port, service, instance, token, 10*time.Second)
+		if err != nil {
+			return &unixsock.Response{
+				Status: unixsock.STATUS_FAIL,
+				Error:  err.Error(),
+			}
+		}
+
+		if err = m.logserver.logger.AddDestination(backendKey, remote); err != nil {
+			return &unixsock.Response{
+				Status: unixsock.STATUS_FAIL,
+				Error:  err.Error(),
+			}
+		}
+
+		return &unixsock.Response{
+			Status:  unixsock.STATUS_OK,
+			Payload: console(fmt.Sprintf("added remote backend %s", bold("journald"))),
+		}
+
+	case "kafka":
+		return &unixsock.Response{
+			Status: unixsock.STATUS_FAIL,
+			Error:  fmt.Sprint("Not implemented yet"),
+		}
+
+	default:
+		return &unixsock.Response{
+			Status: unixsock.STATUS_FAIL,
+			Error:  fmt.Sprintf("Unknown backend '%s'", backend),
+		}
+	}
+
 }
 
 // CmdRemoteRemove removes a remote backend

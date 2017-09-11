@@ -77,6 +77,11 @@ func getCleanKey(service, instance string) string {
 	return strings.ToLower(fmt.Sprintf("%s/%s", strings.TrimSpace(service), strings.TrimSpace(instance)))
 }
 
+// getCleanBackendKey cleans inputs and builds from them a backend/host/port key
+func getCleanBackendKey(backend, host string, port int) string {
+	return fmt.Sprintf("%s/%s/%d", strings.TrimSpace(strings.ToLower(backend)), strings.TrimSpace(strings.ToLower(host)), port)
+}
+
 // bold returns a bolded version of v
 func bold(v interface{}) interface{} {
 	return color.New(color.Bold).Sprint(v)
