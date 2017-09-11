@@ -2,9 +2,11 @@ package main
 
 import (
 	"fmt"
-	"github.com/fatih/color"
-	uclient "github.com/vaitekunas/unixsock/client"
 	"strings"
+
+	"github.com/fatih/color"
+	"github.com/vaitekunas/unixsock"
+	uclient "github.com/vaitekunas/unixsock/client"
 )
 
 var CMDS = []string{
@@ -35,6 +37,12 @@ func (c *client) Run(cmd string, args map[string]interface{}) {
 		consoleErr("%s\n", err.Error())
 		return
 	}
+
+	if resp.Status == unixsock.STATUS_FAIL {
+		consoleErr("%s\n", resp.Error)
+		return
+	}
+
 	fmt.Println(resp.Payload)
 }
 

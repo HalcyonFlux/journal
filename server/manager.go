@@ -211,8 +211,8 @@ func (m *managementConsole) CmdTokensAdd(args unixsock.Args) *unixsock.Response 
 	token, err := m.logserver.AddToken(service, instance)
 	if err != nil {
 		return &unixsock.Response{
-			Status: "failure",
-			Error:  fmt.Errorf("Could not add token: %s", err.Error()).Error(),
+			Status: unixsock.STATUS_FAIL,
+			Error:  fmt.Errorf("could not add token: %s", err.Error()).Error(),
 		}
 	}
 
@@ -325,7 +325,7 @@ func (m *managementConsole) CmdTokensListInstances(args unixsock.Args) *unixsock
 			pbytes := m.logserver.stats[key].LogsParsedBytes
 			plogsStr, pbytesStr, _, _ := parsedSums(plogs, pbytes)
 
-			table.AddRow("").Insert(parts[1], fmt.Sprintf("%s...", token[0:10]), ip, fmt.Sprintf("%s (%s)", plogsStr, pbytesStr))
+			table.AddRow("").Insert(parts[1], token, ip, fmt.Sprintf("%s (%s)", plogsStr, pbytesStr))
 		}
 	}
 
@@ -344,11 +344,20 @@ func (m *managementConsole) CmdTokensListServices(args unixsock.Args) *unixsock.
 	// Get aggregated statistics
 	_, aggro, _ := m.logserver.AggregateServiceStatistics()
 
+	m.logserver.Lock()
+	defer m.logserver.Unlock()
+
 	// Service table
-	table := lentele.New("Service", "Instances", "Logs sent", "Volume share")
+	table := lentele.New("Service", "Instances (incl. inactive)", "Logs sent", "Volume share")
 	for _, service := range aggro {
+		active := 0
+		for key := range m.logserver.tokens {
+			if parts := strings.Split(key, "/"); parts[0] == service.service {
+				active++
+			}
+		}
 		plogStr, pbyteStr := prettyParsedSums(service.logs, service.volume)
-		table.AddRow("").Insert(service.service, service.instances, fmt.Sprintf("%s (%s)", plogStr, pbyteStr), fmt.Sprintf("%6.2f%%", service.share*100))
+		table.AddRow("").Insert(service.service, fmt.Sprintf("%d (%d)", active, service.instances), fmt.Sprintf("%s (%s)", plogStr, pbyteStr), fmt.Sprintf("%6.2f%%", service.share*100))
 	}
 
 	buf := bytes.NewBuffer([]byte{})

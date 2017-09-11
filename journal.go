@@ -133,11 +133,11 @@ func (l *Logger) NewCaller(caller string) func(int, string, ...interface{}) erro
 
 }
 
-// NewCallerCode is a wrapper for the Logger.fullog function
-func (l *Logger) NewCallerCode(caller string, code int) func(string, ...interface{}) error {
+// NewCallerWithFields is a wrapper for the Logger.LogFields function
+func (l *Logger) NewCallerWithFields(caller string) func(int, map[string]interface{}) error {
 
-	return func(msg string, format ...interface{}) error {
-		return l.pushToLedger(2, caller, code, msg, format...)
+	return func(code int, msg map[string]interface{}) error {
+		return l.LogFields(caller, code, msg)
 	}
 
 }

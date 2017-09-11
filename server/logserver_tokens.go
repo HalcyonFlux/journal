@@ -159,6 +159,8 @@ func (l *LogServer) removeTokenFromFile(key string, lock bool) error {
 		return err
 	}
 
+	tokens = append(tokens, "\n")
+
 	// Revwrite tokens.db
 	if err := ioutil.WriteFile(l.tokenPath, []byte(strings.Join(tokens, "\n")), 0600); err != nil {
 		return fmt.Errorf("removeTokenFromFile: could not rewrite token database: %s", err.Error())

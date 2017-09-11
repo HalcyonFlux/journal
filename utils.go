@@ -355,9 +355,9 @@ func (l *Logger) write() killswitch {
 						l.Log("system", 1, "write: could not marshal log entry: %s", err.Error())
 					}
 
-					for _, remote := range l.remoteWriters {
+					for backend, remote := range l.remoteWriters {
 						if _, err := remote.Write(jsoned); err != nil {
-							fmsg := fmt.Sprintf("write: could not send log to a remote backend: %s", err.Error())
+							fmsg := fmt.Sprintf("write: could not send log to a remote backend '%s': %s", backend, err.Error())
 							_, file, line, _ := runtime.Caller(2)
 							name, isErr := l.getMsgCode(1)
 							rawEntry := l.newRawEntry("system", name, fmsg, file, line, 1, isErr)

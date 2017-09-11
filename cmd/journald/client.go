@@ -89,9 +89,14 @@ Loop:
 			c.Run("remote.list", map[string]interface{}{})
 
 		case argCmd(args, 2) == "list logs":
-			if len(args) > 3 {
+			if len(args) > 2 {
+        logcount, err := strconv.Atoi(args[2])
+        if err != nil {
+          consoleErr("Invalid log count '%s'", args[5])
+        }
+
 				c.Run("logs.list", map[string]interface{}{
-					"show": args[3],
+					"show": logcount,
 				})
 			} else {
 				c.Run("logs.list", map[string]interface{}{})
