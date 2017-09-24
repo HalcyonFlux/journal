@@ -15,10 +15,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/net/context"
 )
 
 // getMsgCode returns message code's string type
-func (l *Logger) getMsgCode(code int) (string, bool) {
+func (l *logger) getMsgCode(code int) (string, bool) {
 
 	resp, ok := l.codes[code]
 	if !ok {
@@ -28,14 +30,14 @@ func (l *Logger) getMsgCode(code int) (string, bool) {
 }
 
 // rotateFile creates a new and archives the old logfile
-func (l *Logger) rotateFile() killswitch {
-	quitChan := make(chan bool, 1)
+func (l *logger) rotateFile(ctx context.Context) {
 
 	// Prepare stdout
 	if l.config.Out == OUT_STDOUT {
 		l.stdout = os.Stdout
-		return quitChan
+		return
 	}
+
 	if l.config.Out == OUT_FILE_AND_STDOUT {
 		l.stdout = os.Stdout
 	}
@@ -102,7 +104,7 @@ func (l *Logger) rotateFile() killswitch {
 				// Wait for up until one minute before the next date
 				select {
 				case <-time.After(time.Duration(delta) * time.Second):
-				case <-quitChan:
+				case <-ctx.Done():
 					break Loop
 				}
 
@@ -111,7 +113,7 @@ func (l *Logger) rotateFile() killswitch {
 			// Wait for a second
 			select {
 			case <-time.After(1 * time.Second):
-			case <-quitChan:
+			case <-ctx.Done():
 				break Loop
 			}
 
@@ -119,7 +121,6 @@ func (l *Logger) rotateFile() killswitch {
 	}()
 
 	<-ready
-	return quitChan
 }
 
 // rotationDate returns a log's rotation date with a specific offset
@@ -237,7 +238,7 @@ func compressOld(folder, except string) {
 }
 
 // headers returns log's column headers as a tab-separated string
-func (l *Logger) headers() string {
+func (l *logger) headers() string {
 	header := make([]string, len(l.config.Columns))
 	for i, code := range l.config.Columns {
 		header[i] = colname(code)
@@ -247,7 +248,7 @@ func (l *Logger) headers() string {
 }
 
 // pushToLedger pushes a log entry into the ledger
-func (l *Logger) pushToLedger(depth int, caller string, code int, msg string, format ...interface{}) error {
+func (l *logger) pushToLedger(depth int, caller string, code int, msg string, format ...interface{}) error {
 
 	// An active Logger will wait for the transit to finish
 	inTransit := l.active
@@ -266,7 +267,7 @@ func (l *Logger) pushToLedger(depth int, caller string, code int, msg string, fo
 	name, isErr := l.getMsgCode(code)
 
 	// Prepare log entry
-	entry := l.newRawEntry(caller, name, fmsg, file, code, line, isErr)
+	entry := l.newRawEntry(caller, name, fmsg, file, line, code, isErr)
 
 	// Write entry into the ledger
 	if inTransit {
@@ -284,7 +285,7 @@ func (l *Logger) pushToLedger(depth int, caller string, code int, msg string, fo
 }
 
 // newRawEntry builds a new raw log entry
-func (l *Logger) newRawEntry(caller, name, fmsg, file string, line, code int, isErr bool) logEntry {
+func (l *logger) newRawEntry(caller, name, fmsg, file string, line, code int, isErr bool) logEntry {
 
 	// Prepare log entry
 	entry := logEntry{}
@@ -329,8 +330,7 @@ func (l *Logger) newRawEntry(caller, name, fmsg, file string, line, code int, is
 
 // write processes the log ledger and writes entries to all the relevant sources
 // (local file, stdout, remote file, kafka)
-func (l *Logger) write() killswitch {
-	quitChan := make(chan bool, 1)
+func (l *logger) write(ctx context.Context) {
 
 	ready := make(chan bool, 1)
 	go func() {
@@ -369,7 +369,7 @@ func (l *Logger) write() killswitch {
 				l.wg.Done()
 				l.mu.Unlock()
 
-			case <-quitChan:
+			case <-ctx.Done():
 				break Loop
 			}
 
@@ -377,11 +377,10 @@ func (l *Logger) write() killswitch {
 	}()
 
 	<-ready
-	return quitChan
 }
 
 // writeLocal writes a log to local endpoints
-func (l *Logger) writeLocal(entry logEntry) {
+func (l *logger) writeLocal(entry logEntry) {
 
 	// Write to stdout
 	if l.stdout != nil {

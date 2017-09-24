@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vaitekunas/journal/logrpc"
+	"golang.org/x/net/context"
 )
 
 // Config contains all the necessary settings to create a new local logging facility
@@ -26,11 +27,8 @@ type Config struct {
 	Columns  []int64 // List of relevant columns (can be empty if default columns should be used)
 }
 
-// Killswitch is a bool channel used to stop coroutines
-type killswitch chan<- bool
-
 // New creates a new logging facility
-func New(config *Config) (*Logger, error) {
+func New(config *Config) (Logger, error) {
 
 	// Validate options
 	if config.Rotation < ROT_NONE || config.Rotation > ROT_ANNUALLY {
@@ -57,8 +55,11 @@ func New(config *Config) (*Logger, error) {
 		}
 	}
 
+	// Internal context
+	internalCTX, cancel := context.WithCancel(context.Background())
+
 	// Initiate log instance
-	Log := &Logger{
+	Log := &logger{
 		mu:            &sync.Mutex{},
 		wg:            &sync.WaitGroup{},
 		active:        true,
@@ -66,20 +67,20 @@ func New(config *Config) (*Logger, error) {
 		codes:         defaultCodes,
 		ledger:        make(chan logEntry, 1000),
 		remoteWriters: map[string]io.Writer{},
-		killswitches:  []killswitch{},
+		cancel:        cancel,
 	}
 
 	// Start file rotation (async)
-	Log.killswitches = append(Log.killswitches, Log.rotateFile())
+	Log.rotateFile(internalCTX)
 
 	// Start log writer
-	Log.killswitches = append(Log.killswitches, Log.write())
+	Log.write(internalCTX)
 
 	return Log, nil
 }
 
-// Logger is the main loggger struct
-type Logger struct {
+// logger is the main loggger struct
+type logger struct {
 	mu *sync.Mutex     // Protect logfile changes
 	wg *sync.WaitGroup // Protect ledger processing
 
@@ -87,8 +88,8 @@ type Logger struct {
 	config *Config      // Main config
 	codes  map[int]Code // Mapping of integer message codes to their string values
 
-	ledger       chan logEntry // Ledger of unprocessed log entries
-	killswitches []killswitch  // Killswitches of all coroutines spawned by the logger
+	ledger chan logEntry // Ledger of unprocessed log entries
+	cancel func()        // Function to cancel internal  context
 
 	// log Writers
 	logfile       *os.File             // local logfile's file descriptor
@@ -101,7 +102,7 @@ type Logger struct {
 }
 
 // UseCustomCodes Replaces loggers default message codes with custom ones
-func (l *Logger) UseCustomCodes(codes map[int]Code) {
+func (l *logger) UseCustomCodes(codes map[int]Code) {
 	for code, lCode := range codes {
 		if code > 1 && code < 999 {
 			l.codes[code] = lCode
@@ -110,12 +111,12 @@ func (l *Logger) UseCustomCodes(codes map[int]Code) {
 }
 
 // Log logs a simple message and returns nil or error, depending on the code
-func (l *Logger) Log(caller string, code int, msg string, format ...interface{}) error {
+func (l *logger) Log(caller string, code int, msg string, format ...interface{}) error {
 	return l.pushToLedger(2, caller, code, msg, format...)
 }
 
 // LogFields encodes the message (not the whole log) in JSON and writes to log
-func (l *Logger) LogFields(caller string, code int, msg map[string]interface{}) error {
+func (l *logger) LogFields(caller string, code int, msg map[string]interface{}) error {
 	jsoned, err := json.Marshal(msg)
 	if err != nil {
 		return l.pushToLedger(2, "system", 1, "LogFields: could not marshal log entry to JSON: %s", err.Error())
@@ -125,7 +126,7 @@ func (l *Logger) LogFields(caller string, code int, msg map[string]interface{}) 
 }
 
 // NewCaller is a wrapper for the Logger.Log function
-func (l *Logger) NewCaller(caller string) func(int, string, ...interface{}) error {
+func (l *logger) NewCaller(caller string) func(int, string, ...interface{}) error {
 
 	return func(code int, msg string, format ...interface{}) error {
 		return l.pushToLedger(2, caller, code, msg, format...)
@@ -134,7 +135,7 @@ func (l *Logger) NewCaller(caller string) func(int, string, ...interface{}) erro
 }
 
 // NewCallerWithFields is a wrapper for the Logger.LogFields function
-func (l *Logger) NewCallerWithFields(caller string) func(int, map[string]interface{}) error {
+func (l *logger) NewCallerWithFields(caller string) func(int, map[string]interface{}) error {
 
 	return func(code int, msg map[string]interface{}) error {
 		return l.LogFields(caller, code, msg)
@@ -144,7 +145,7 @@ func (l *Logger) NewCallerWithFields(caller string) func(int, map[string]interfa
 
 // RawEntry writes a raw log entry (map of strings) into the ledger.
 // The raw entry must contain columns COL_DATE_YYMMDD_HHMMSS_NANO to COL_LINE
-func (l *Logger) RawEntry(entry map[int64]string) error {
+func (l *logger) RawEntry(entry map[int64]string) error {
 
 	// Validate the raw Entry
 	for _, code := range defaultCols {
@@ -165,7 +166,7 @@ func (l *Logger) RawEntry(entry map[int64]string) error {
 }
 
 // AddDestination adds a (remote) destination to send logs to
-func (l *Logger) AddDestination(name string, writer io.Writer) error {
+func (l *logger) AddDestination(name string, writer io.Writer) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -179,7 +180,7 @@ func (l *Logger) AddDestination(name string, writer io.Writer) error {
 }
 
 // RemoveDestination removes a (remote) destination to send logs to
-func (l *Logger) RemoveDestination(name string) error {
+func (l *logger) RemoveDestination(name string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -193,7 +194,7 @@ func (l *Logger) RemoveDestination(name string) error {
 }
 
 // ListDestinations lists all (remote) destinations
-func (l *Logger) ListDestinations() []string {
+func (l *logger) ListDestinations() []string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -220,7 +221,7 @@ func (l *Logger) ListDestinations() []string {
 }
 
 // Quit stops all Logger coroutines and closes files
-func (l *Logger) Quit() {
+func (l *logger) Quit() {
 
 	// Deactivate ledger
 	l.active = false
@@ -232,10 +233,8 @@ func (l *Logger) Quit() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	// Stop all registered coroutines
-	for _, killswitch := range l.killswitches {
-		killswitch <- true
-	}
+	// Stop all registered goroutines
+	l.cancel()
 
 	// Close active log
 	if l.logfile != nil {

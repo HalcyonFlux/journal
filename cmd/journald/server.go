@@ -29,7 +29,7 @@ func StartServer(srv *flag.FlagSet) {
 	jsonPtr := srv.Bool("json", true, "Print logs encoded in json")
 	compressPtr := srv.Bool("compress", true, "Compress rotated logs")
 
-  srv.Parse(os.Args[2:])
+	srv.Parse(os.Args[2:])
 
 	// Decide on rotation
 	var rot int
@@ -79,8 +79,11 @@ func StartServer(srv *flag.FlagSet) {
 		},
 	}
 
+	// Management console
+	manager := server.NewConsole()
+
 	// Start the local logger
-	logSrv, err := server.New(config)
+	logSrv, err := server.New(config, manager)
 	if err != nil {
 		fmt.Printf("Could not start log server: %s\n", err.Error())
 		os.Exit(1)

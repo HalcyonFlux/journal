@@ -14,7 +14,7 @@ import (
 )
 
 // GatherStatistics saves log-related statistics
-func (l *LogServer) GatherStatistics(service, instance, key, ip string, logEntry *logrpc.LogEntry) {
+func (l *logServer) GatherStatistics(service, instance, key, ip string, logEntry *logrpc.LogEntry) {
 	l.Lock()
 	defer l.Unlock()
 
@@ -41,17 +41,43 @@ func (l *LogServer) GatherStatistics(service, instance, key, ip string, logEntry
 	stats.LastActive = now
 }
 
-// AggregateStatistics contains aggregated logging statistics
+// AggregateStatistics contains aggregated statistics
 type AggregateStatistics struct {
-	service   string
-	instances int
-	volume    int64
-	logs      int64
-	share     float64
+	Service   string
+	Instances int
+	Volume    int64
+	Logs      int64
+	Share     float64
+}
+
+// GetStatistics returns LogServer's statistics
+func (l *logServer) GetStatistics() map[string]*Statistic {
+	l.Lock()
+	defer l.Unlock()
+
+	copyStats := map[string]*Statistic{}
+	for key, stats := range l.stats {
+
+		logsParsed := [24]int64{}
+		logsParsedBytes := [24]int64{}
+		copy(logsParsed[:24], stats.LogsParsed[:24])
+		copy(logsParsedBytes[:24], stats.LogsParsedBytes[:24])
+
+		copyStats[key] = &Statistic{
+			Service:         stats.Service,
+			Instance:        stats.Instance,
+			LogsParsed:      logsParsed,
+			LogsParsedBytes: logsParsedBytes,
+			LastIP:          stats.LastIP,
+			LastActive:      stats.LastActive,
+		}
+	}
+
+	return copyStats
 }
 
 // AggregateServiceStatistics aggregates statistics
-func (l *LogServer) AggregateServiceStatistics() (totalVolume int64, services []*AggregateStatistics, hourly [24][2]int64) {
+func (l *logServer) AggregateServiceStatistics() (totalVolume int64, services []*AggregateStatistics, hourly [24][2]int64) {
 	l.Lock()
 	defer l.Unlock()
 
@@ -68,7 +94,7 @@ func (l *LogServer) AggregateServiceStatistics() (totalVolume int64, services []
 		serviceAggro, ok := serviceAggroMap[service]
 		if !ok {
 			serviceNames = append(serviceNames, service)
-			serviceAggro = &AggregateStatistics{service: service}
+			serviceAggro = &AggregateStatistics{Service: service}
 			serviceAggroMap[service] = serviceAggro
 		}
 
@@ -77,9 +103,9 @@ func (l *LogServer) AggregateServiceStatistics() (totalVolume int64, services []
 			hourly[i][1] += stats.LogsParsedBytes[i]
 		}
 
-		serviceAggro.instances++
-		serviceAggro.logs += plogs
-		serviceAggro.volume += pbytes
+		serviceAggro.Instances++
+		serviceAggro.Logs += plogs
+		serviceAggro.Volume += pbytes
 
 		totalLogVolume += pbytes
 	}
@@ -88,8 +114,8 @@ func (l *LogServer) AggregateServiceStatistics() (totalVolume int64, services []
 	shares := make([]float64, len(serviceNames))
 	for i, name := range serviceNames {
 		stsum := serviceAggroMap[name]
-		stsum.share = float64(stsum.volume) / float64(totalLogVolume)
-		shares[i] = stsum.share
+		stsum.Share = float64(stsum.Volume) / float64(totalLogVolume)
+		shares[i] = stsum.Share
 	}
 
 	// Sort by share
@@ -104,7 +130,7 @@ func (l *LogServer) AggregateServiceStatistics() (totalVolume int64, services []
 }
 
 // periodicallyDumpStats periodically dumps statistics to file
-func (l *LogServer) periodicallyDumpStats(ctx context.Context, period time.Duration) {
+func (l *logServer) periodicallyDumpStats(ctx context.Context, period time.Duration) {
 Loop:
 	for {
 		select {
@@ -117,7 +143,7 @@ Loop:
 }
 
 // dumpStatsToFile dumps all the statistics into file
-func (l *LogServer) dumpStatsToFile() error {
+func (l *logServer) dumpStatsToFile() error {
 	l.Lock()
 	defer l.Unlock()
 
@@ -148,7 +174,7 @@ func (l *LogServer) dumpStatsToFile() error {
 }
 
 // loadStatisticsFromDisk loads server statistics from file
-func (l *LogServer) loadStatisticsFromDisk() error {
+func (l *logServer) loadStatisticsFromDisk() error {
 	l.Lock()
 	defer l.Unlock()
 

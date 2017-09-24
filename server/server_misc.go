@@ -6,7 +6,7 @@ import (
 )
 
 // Logfiles returns statistics about available log files
-func (l *LogServer) Logfiles() (map[string]string, error) {
+func (l *logServer) Logfiles() (map[string]string, error) {
 	files, err := ioutil.ReadDir(l.logfolder)
 	if err != nil {
 		return nil, fmt.Errorf("Logfiles: could not list logfiles: %s", err.Error())

@@ -11,7 +11,7 @@ import (
 )
 
 // AddToken creates a new token for the service/instance if it does not yet exist
-func (l *LogServer) AddToken(service, instance string) (string, error) {
+func (l *logServer) AddToken(service, instance string) (string, error) {
 	l.Lock()
 	defer l.Unlock()
 
@@ -45,8 +45,21 @@ func (l *LogServer) AddToken(service, instance string) (string, error) {
 	return token, nil
 }
 
+// GetTokens returns LogServer's tokens
+func (l *logServer) GetTokens() map[string]string {
+	l.Lock()
+	l.Unlock()
+
+	copyTokens := map[string]string{}
+	for key, token := range l.tokens {
+		copyTokens[key] = token
+	}
+
+	return copyTokens
+}
+
 // RemoveTokens removes all the authentication tokens of a service
-func (l *LogServer) RemoveTokens(service string) error {
+func (l *logServer) RemoveTokens(service string) error {
 	l.Lock()
 	defer l.Unlock()
 
@@ -70,7 +83,7 @@ func (l *LogServer) RemoveTokens(service string) error {
 }
 
 // RemoveToken removes an authentication token
-func (l *LogServer) RemoveToken(service, instance string, lock bool) error {
+func (l *logServer) RemoveToken(service, instance string, lock bool) error {
 	if lock {
 		l.Lock()
 		defer l.Unlock()
@@ -96,7 +109,7 @@ func (l *LogServer) RemoveToken(service, instance string, lock bool) error {
 }
 
 // writeTokenToFile writes a tokens to file
-func (l *LogServer) writeTokenToFile(key, token string) error {
+func (l *logServer) writeTokenToFile(key, token string) error {
 
 	// Make sure file is writeable
 	if err := fileExists(l.tokenPath); err != nil {
@@ -118,7 +131,7 @@ func (l *LogServer) writeTokenToFile(key, token string) error {
 }
 
 // removeTokenFromFile removes a single token from the tokens.db
-func (l *LogServer) removeTokenFromFile(key string, lock bool) error {
+func (l *logServer) removeTokenFromFile(key string, lock bool) error {
 	if lock {
 		l.Lock()
 		defer l.Unlock()
@@ -170,7 +183,7 @@ func (l *LogServer) removeTokenFromFile(key string, lock bool) error {
 }
 
 // loadTokensFromDisk loads all the tokens from disk to memory
-func (l *LogServer) loadTokensFromDisk() error {
+func (l *logServer) loadTokensFromDisk() error {
 	l.Lock()
 	defer l.Unlock()
 

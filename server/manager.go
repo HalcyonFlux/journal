@@ -17,6 +17,9 @@ import (
 // ManagementConsole handles commands received over the unix socket
 type ManagementConsole interface {
 
+	// AttachToServer attaches a management console to the LogServer
+	AttachToServer(LogServer)
+
 	// CmdStatistics displays various statistics
 	CmdStatistics(unixsock.Args) *unixsock.Response
 
@@ -52,21 +55,26 @@ type ManagementConsole interface {
 }
 
 // NewConsole creates a new management console for the log server
-func NewConsole(server *LogServer) ManagementConsole {
+func NewConsole() ManagementConsole {
 
-	return &managementConsole{
-		logserver: server,
-	}
+	return &managementConsole{}
 }
 
 // managementConsole handles commands received over the unix socket
 type managementConsole struct {
 	banner    string
-	logserver *LogServer
+	logserver LogServer
 }
 
 // Execute is the executor of management console commands
 func (m *managementConsole) Execute(cmd string, args unixsock.Args) *unixsock.Response {
+
+	if m.logserver == nil {
+		return &unixsock.Response{
+			Status: "failure",
+			Error:  "Execute: not attached to a log server",
+		}
+	}
 
 	fmt.Println(console(bold(strings.ToLower(cmd))))
 
@@ -137,6 +145,11 @@ var respMissingArgs = &unixsock.Response{
 	Error:  fmt.Sprint("Missing/invalid parameters"),
 }
 
+// AttachToServer attaches a management console to the log server
+func (m *managementConsole) AttachToServer(srv LogServer) {
+	m.logserver = srv
+}
+
 // CmdStatistics displays various log-related statistics
 func (m *managementConsole) CmdStatistics(args unixsock.Args) *unixsock.Response {
 
@@ -146,8 +159,8 @@ func (m *managementConsole) CmdStatistics(args unixsock.Args) *unixsock.Response
 	// Service table
 	serviceTable := lentele.New("Service", "Instances", "Logs sent", "Volume share")
 	for _, service := range aggro {
-		plogStr, pbyteStr := prettyParsedSums(service.logs, service.volume)
-		serviceTable.AddRow("").Insert(service.service, service.instances, fmt.Sprintf("%s (%s)", plogStr, pbyteStr), fmt.Sprintf("%6.2f%%", service.share*100))
+		plogStr, pbyteStr := prettyParsedSums(service.Logs, service.Volume)
+		serviceTable.AddRow("").Insert(service.Service, service.Instances, fmt.Sprintf("%s (%s)", plogStr, pbyteStr), fmt.Sprintf("%6.2f%%", service.Share*100))
 	}
 
 	// Hourly table
@@ -304,9 +317,9 @@ func (m *managementConsole) CmdTokensListInstances(args unixsock.Args) *unixsock
 		return respMissingArgs
 	}
 
-	// Lock tokens
-	m.logserver.Lock()
-	defer m.logserver.Unlock()
+	// Get tokens and stats
+	tokens := m.logserver.GetTokens()
+	stats := m.logserver.GetStatistics()
 
 	// Identify service
 	service := strings.ToLower(args["service"].(string))
@@ -314,15 +327,15 @@ func (m *managementConsole) CmdTokensListInstances(args unixsock.Args) *unixsock
 	// Prepare table
 	table := lentele.New("Instance", "Token", "Last known IP", "Logs sent")
 
-	for key, token := range m.logserver.tokens {
+	for key, token := range tokens {
 		parts := strings.Split(key, "/")
 		if len(parts) != 2 {
 			continue
 		}
 		if parts[0] == service {
-			ip := m.logserver.stats[key].LastIP
-			plogs := m.logserver.stats[key].LogsParsed
-			pbytes := m.logserver.stats[key].LogsParsedBytes
+			ip := stats[key].LastIP
+			plogs := stats[key].LogsParsed
+			pbytes := stats[key].LogsParsedBytes
 			plogsStr, pbytesStr, _, _ := parsedSums(plogs, pbytes)
 
 			table.AddRow("").Insert(parts[1], token, ip, fmt.Sprintf("%s (%s)", plogsStr, pbytesStr))
@@ -344,20 +357,20 @@ func (m *managementConsole) CmdTokensListServices(args unixsock.Args) *unixsock.
 	// Get aggregated statistics
 	_, aggro, _ := m.logserver.AggregateServiceStatistics()
 
-	m.logserver.Lock()
-	defer m.logserver.Unlock()
+	// Get tokens
+	tokens := m.logserver.GetTokens()
 
 	// Service table
 	table := lentele.New("Service", "Instances (incl. inactive)", "Logs sent", "Volume share")
 	for _, service := range aggro {
 		active := 0
-		for key := range m.logserver.tokens {
-			if parts := strings.Split(key, "/"); parts[0] == service.service {
+		for key := range tokens {
+			if parts := strings.Split(key, "/"); parts[0] == service.Service {
 				active++
 			}
 		}
-		plogStr, pbyteStr := prettyParsedSums(service.logs, service.volume)
-		table.AddRow("").Insert(service.service, fmt.Sprintf("%d (%d)", active, service.instances), fmt.Sprintf("%s (%s)", plogStr, pbyteStr), fmt.Sprintf("%6.2f%%", service.share*100))
+		plogStr, pbyteStr := prettyParsedSums(service.Logs, service.Volume)
+		table.AddRow("").Insert(service.Service, fmt.Sprintf("%d (%d)", active, service.Instances), fmt.Sprintf("%s (%s)", plogStr, pbyteStr), fmt.Sprintf("%6.2f%%", service.Share*100))
 	}
 
 	buf := bytes.NewBuffer([]byte{})
@@ -455,9 +468,6 @@ func (m *managementConsole) CmdRemoteAdd(args unixsock.Args) *unixsock.Response 
 		instance := args["instance"].(string)
 		token := args["token"].(string)
 
-		m.logserver.Lock()
-		defer m.logserver.Unlock()
-
 		remote, err := journal.ConnectToJournald(host, port, service, instance, token, 10*time.Second)
 		if err != nil {
 			return &unixsock.Response{
@@ -466,7 +476,7 @@ func (m *managementConsole) CmdRemoteAdd(args unixsock.Args) *unixsock.Response 
 			}
 		}
 
-		if err = m.logserver.logger.AddDestination(backendKey, remote); err != nil {
+		if err = m.logserver.AddDestination(backendKey, remote); err != nil {
 			return &unixsock.Response{
 				Status: unixsock.STATUS_FAIL,
 				Error:  err.Error(),
@@ -513,7 +523,7 @@ func (m *managementConsole) CmdRemoteRemove(args unixsock.Args) *unixsock.Respon
 	port := int(args["port"].(float64))
 	backendKey := getCleanBackendKey(backend, host, port)
 
-	if err := m.logserver.logger.RemoveDestination(backendKey); err != nil {
+	if err := m.logserver.RemoveDestination(backendKey); err != nil {
 		return &unixsock.Response{
 			Status: unixsock.STATUS_FAIL,
 			Error:  err.Error(),
@@ -530,7 +540,7 @@ func (m *managementConsole) CmdRemoteRemove(args unixsock.Args) *unixsock.Respon
 // CmdRemoteList lists all active remote backends
 func (m *managementConsole) CmdRemoteList(args unixsock.Args) *unixsock.Response {
 
-	destinations := m.logserver.logger.ListDestinations()
+	destinations := m.logserver.ListDestinations()
 	table := lentele.New("Destination")
 	rowWidth := len("Destination")
 	for _, dst := range destinations {
