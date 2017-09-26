@@ -1,14 +1,13 @@
-package journal
+package connect
 
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/vaitekunas/journal/logrpc"
-	"io"
 	"time"
 
+	"github.com/vaitekunas/journal/logrpc"
+
 	context "golang.org/x/net/context"
-	grpc "google.golang.org/grpc"
 )
 
 // remoteClient implements the io.Writer and logrpc.RemoteLoggerClient interfaces
@@ -26,7 +25,7 @@ func (r *remoteClient) Write(p []byte) (n int, err error) {
 	ctx, _ := context.WithTimeout(context.Background(), r.timeout)
 
 	// Unmarshal log entry
-	newEntry := logEntry{}
+	newEntry := map[int64]string{}
 	if err := json.Unmarshal(p, &newEntry); err != nil {
 		return 0, fmt.Errorf("Write: could not unmarshal logEntry: %s", err.Error())
 	}
@@ -45,31 +44,4 @@ func (r *remoteClient) Close() error {
 		return r.close()
 	}
 	return nil
-}
-
-// ConnectToJournald connects to a log server backend
-func ConnectToJournald(host string, port int, service, instance, token string, timeout time.Duration) (io.WriteCloser, error) {
-
-	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", host, port), grpc.WithPerRPCCredentials(&logrpc.TokenCred{
-		IP:       getIP(),
-		Service:  service,
-		Instance: instance,
-		Token:    token,
-	}), grpc.WithInsecure()) // TODO: replace or make it an option
-
-	if err != nil {
-		return nil, fmt.Errorf("ConnectToLogServer: could not establish a gRPC connection :%s", err.Error())
-	}
-
-	return &remoteClient{
-		timeout: timeout,
-		close:   conn.Close,
-		client:  logrpc.NewRemoteLoggerClient(conn),
-	}, nil
-}
-
-// ConnectToKafka connects to a kafka backend as a producer
-func ConnectToKafka(host string, port int, topic string) (io.WriteCloser, error) {
-
-	return nil, nil
 }

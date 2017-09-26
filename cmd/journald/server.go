@@ -16,13 +16,13 @@ func StartServer(srv *flag.FlagSet) {
 	// Remote config
 	hostPtr := srv.String("host", "127.0.0.1", "Remote logger's host")
 	portPtr := srv.Int("port", 4332, "Remote logger's port")
-	unixSockPtr := srv.String("unix-socket", "/var/run/logsrv.sock", "Remote logger's unix socket file")
-	tokenPtr := srv.String("tokens", "/opt/logsrv/tokens.db", "Remote logger's access tokens")
-	statsPtr := srv.String("stats", "/opt/logsrv/stats.db", "Remote logger's statistics")
+	unixSockPtr := srv.String("unix-socket", "/var/run/journald.sock", "Remote logger's unix socket file")
+	tokenPtr := srv.String("tokens", "/opt/journald/tokens.db", "Remote logger's access tokens")
+	statsPtr := srv.String("stats", "/opt/journald/stats.db", "Remote logger's statistics")
 
 	// Local config
 	filePtr := srv.String("filestem", "aggregate", "Log filename stem (without date and extension)")
-	folderPtr := srv.String("folder", "/var/logs/logsrv", "Logserver's folder to store logs in")
+	folderPtr := srv.String("folder", "/var/logs/journald", "Logserver's folder to store logs in")
 	rotPtr := srv.String("rotation", "daily", "Log rotation mode: {none|daily|weekly|monthly|annually}")
 	outPtr := srv.String("output", "file", "Log output mode: {file|stdout|both}")
 	headPtr := srv.Bool("headers", true, "Always print headers")
@@ -83,7 +83,7 @@ func StartServer(srv *flag.FlagSet) {
 	manager := server.NewConsole()
 
 	// Start the local logger
-	logSrv, err := server.New(config, manager)
+	journald, err := server.New(config, manager)
 	if err != nil {
 		fmt.Printf("Could not start log server: %s\n", err.Error())
 		os.Exit(1)
@@ -98,10 +98,10 @@ func StartServer(srv *flag.FlagSet) {
 	select {
 	case <-sig: // Standard os interrupt (ctrl+c)
 		fmt.Println("\nReceived interrupt signal. Quitting.")
-		logSrv.Quit()
-	case <-logSrv.KillSwitch(): // Can be triggered via the management console
+		journald.Quit()
+	case <-journald.KillSwitch(): // Can be triggered via the management console
 		fmt.Println("Received killswitch signal. Quitting.")
-		logSrv.Quit()
+		journald.Quit()
 	}
 	fmt.Println("journald has been shut down...")
 }

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"os"
 	"sort"
 	"time"
 
@@ -158,19 +157,12 @@ func (l *logServer) dumpStatsToFile() error {
 		return fmt.Errorf("dumpStatsToFile: could not marshal statistics to json: %s", errJSON.Error())
 	}
 
-	// Open file for reading
-	f, err := os.OpenFile(l.statsPath, os.O_WRONLY, 600)
-	if err != nil {
-		return fmt.Errorf("dumpStatsToFile: could not open statistics file for writing: %s", err.Error())
-	}
-
 	// Write stats
-	if _, err := f.Write(jsoned); err != nil {
-		defer f.Close()
+	if err := ioutil.WriteFile(l.statsPath, jsoned, 0600); err != nil {
 		return fmt.Errorf("dumpStatsToFile: could not dump stats: %s", err.Error())
 	}
 
-	return f.Close()
+	return nil
 }
 
 // loadStatisticsFromDisk loads server statistics from file
@@ -182,13 +174,6 @@ func (l *logServer) loadStatisticsFromDisk() error {
 	if err := fileExists(l.statsPath); err != nil {
 		return fmt.Errorf("loadStatisticsFromDisk: could not create statistics database: %s", err.Error())
 	}
-
-	// Open file for reading
-	f, err := os.OpenFile(l.statsPath, os.O_RDONLY, 600)
-	if err != nil {
-		return fmt.Errorf("loadStatisticsFromDisk: could not open statistics file for reading: %s", err.Error())
-	}
-	defer f.Close()
 
 	// Read json-encoded statistics
 	jsoned, err := ioutil.ReadFile(l.statsPath)

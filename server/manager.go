@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/vaitekunas/journal"
+	"github.com/vaitekunas/journal/connect"
 	"github.com/vaitekunas/lentele"
 	"github.com/vaitekunas/unixsock"
 )
@@ -468,7 +468,7 @@ func (m *managementConsole) CmdRemoteAdd(args unixsock.Args) *unixsock.Response 
 		instance := args["instance"].(string)
 		token := args["token"].(string)
 
-		remote, err := journal.ConnectToJournald(host, port, service, instance, token, 10*time.Second)
+		remote, err := connect.ToJournald(host, port, service, instance, token, 10*time.Second)
 		if err != nil {
 			return &unixsock.Response{
 				Status: unixsock.STATUS_FAIL,
