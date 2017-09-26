@@ -1,9 +1,6 @@
 # journal [![godoc](https://img.shields.io/badge/go-documentation-blue.svg)](https://godoc.org/github.com/vaitekunas/journal) [![Go Report Card](https://goreportcard.com/badge/github.com/vaitekunas/journal)](https://goreportcard.com/report/github.com/vaitekunas/journal) [![Build Status](https://travis-ci.org/vaitekunas/journal.svg?branch=master)](https://travis-ci.org/vaitekunas/journal) [![Coverage Status](https://coveralls.io/repos/github/vaitekunas/journal/badge.svg?branch=master)](https://coveralls.io/github/vaitekunas/journal?branch=master)
 
-<video style="width: 688px; height: 288px;" loop="" autoplay="">
- <source src="doc/video/journald.mp4" type="video/mp4">
- Your browser does not support the video tag.
-</video>
+![journald](doc/video/journald.gif)
 
 `journal` is a golang logging facility capable of writing structured log messages to many
 `io.Writer` interfaces as well as remote backends. The default remote backend (`journald`)
