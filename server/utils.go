@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -112,14 +113,19 @@ func parsedSums(parsedLogs, parsedBytes [24]int64) (string, string, int64, int64
 func prettyParsedSums(plogs, pbytes int64) (plogsStr, pbytesStr string) {
 
 	// Add thousands separator for parsed logs
+	var plogsTsd []string
 	plogsStrNorm := strconv.FormatInt(plogs, 10)
-	seps := int(len(plogsStrNorm)/3) + 1
-	plogsTsd := make([]string, seps)
-	for i := 1; i <= seps; i++ {
-		if len(plogsStrNorm)-i*3 >= 0 {
-			plogsTsd[seps-i] = plogsStrNorm[len(plogsStrNorm)-i*3 : len(plogsStrNorm)-(i-1)*3]
-		} else {
-			plogsTsd[seps-i] = plogsStrNorm[:len(plogsStrNorm)-(i-1)*3]
+	seps := int(math.Ceil(float64(len(plogsStrNorm)) / 3.0))
+	if seps < 2 {
+		plogsTsd = []string{plogsStrNorm}
+	} else {
+		plogsTsd = make([]string, seps)
+		for i := 1; i <= seps; i++ {
+			if len(plogsStrNorm)-i*3 >= 0 {
+				plogsTsd[seps-i] = plogsStrNorm[len(plogsStrNorm)-i*3 : len(plogsStrNorm)-(i-1)*3]
+			} else {
+				plogsTsd[seps-i] = plogsStrNorm[:len(plogsStrNorm)-(i-1)*3]
+			}
 		}
 	}
 
@@ -226,9 +232,9 @@ func barchart(dst io.Writer, ticks []interface{}, values []float64, blockchar st
 	var usechar string
 
 	// Precalculate some statistics
-	realHeight := 0
 	barwidth := 0
 	lineWidth := 0
+	maxVal := 0.0
 	for i := range values {
 		tStr := fmt.Sprintf("%v", ticks[i])
 		if width := len(tStr); width > barwidth {
@@ -236,16 +242,20 @@ func barchart(dst io.Writer, ticks []interface{}, values []float64, blockchar st
 		}
 
 		v := values[i]
-		if barHeight := int(float64(maxHeight) * float64(v)); barHeight > realHeight {
-			realHeight = barHeight
+		if v > maxVal {
+			maxVal = v
 		}
 		lineWidth += utf8.RuneCountInString(tStr) + sep
 	}
 	lineWidth += 10 // ylabel+space+bar+space
 	offset := getOffset(lineWidth)
-	realHeight++
 
-	for j := realHeight; j >= -1; j-- {
+	maxVal = maxVal * (float64(maxHeight) + 1) / float64(maxHeight)
+	if maxVal > 1 {
+		maxVal = 1
+	}
+
+	for j := maxHeight; j >= -1; j-- {
 		line := bytes.NewBufferString("")
 
 		for i, tick := range ticks {
@@ -270,16 +280,15 @@ func barchart(dst io.Writer, ticks []interface{}, values []float64, blockchar st
 
 			// Bars
 			if i == 0 {
-				if realHeight < 5 || j%2 == realHeight%2 {
-					share := fmt.Sprintf("%6.2f%%", float64(j)/float64(realHeight)*100)
+				if maxHeight < 5 || j%2 == maxHeight%2 {
+					share := fmt.Sprintf("%6.2f%%", float64(j)/(float64(maxHeight)/maxVal)*100)
 					line.WriteString(fmt.Sprintf("%-7s %s ", share, "┃"))
 				} else {
 					line.WriteString(fmt.Sprintf("%-7s %s ", "", "┃"))
 				}
 			}
-			barHeight := int(float64(maxHeight) * values[i])
 
-			if barHeight >= j {
+			if values[i] >= float64(j)/float64(maxHeight)*maxVal {
 				usechar = c.Sprint(blockchar)
 			} else {
 				usechar = " "
